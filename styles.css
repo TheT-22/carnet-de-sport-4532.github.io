@@ -201,6 +201,28 @@ textarea { min-height: 84px; resize: vertical; line-height: 1.45; }
 .set .fill { min-height: 44px; border-radius: var(--r-ctl); border: 1px dashed var(--rule); background: none; font-size: 13px; color: var(--steel); cursor: pointer; }
 .panel { display: grid; gap: 12px; padding: 14px; border-radius: 12px; background: var(--chalk); }
 
+/* ---------- Séance libre ---------- */
+.titled { display: grid; gap: 2px; }
+.note.stack { display: grid; gap: 10px; }
+.btn.outline { border-color: var(--plate); color: var(--plate); }
+.btn.wide { width: 100%; }
+.icon-btn {
+  flex: none; width: 44px; height: 44px; display: inline-grid; place-items: center;
+  border-radius: var(--r-ctl); border: 1px solid var(--rule); background: var(--surface); color: var(--steel); cursor: pointer;
+}
+.seg.stack { flex-direction: column; }
+.seg.stack button { text-align: left; }
+.dialog.tall { max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px - env(safe-area-inset-top)); overflow-y: auto; overscroll-behavior: contain; align-content: start; gap: 8px; }
+.menu-group { display: grid; }
+.menu-group h3 { font-size: 13px; font-weight: 650; font-stretch: 100%; color: var(--steel); text-transform: uppercase; letter-spacing: .04em; padding: 12px 0 4px; }
+.pick {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%; min-height: 50px;
+  padding: 8px 2px; border: 0; border-bottom: 1px solid var(--rule); background: none; text-align: left; cursor: pointer; color: var(--ink);
+}
+.pick .meta { font-size: 13px; color: var(--steel); white-space: nowrap; }
+.pick:disabled { color: var(--steel); cursor: default; }
+.seg.chips button { min-height: 38px; padding: 6px 12px; font-size: 14px; }
+
 /* ---------- Week ---------- */
 .weeklist { display: grid; gap: 0; }
 .wrow {
@@ -227,6 +249,8 @@ textarea { min-height: 84px; resize: vertical; line-height: 1.45; }
 .chart .s-c4 { stroke: var(--c4); fill: var(--c4); }
 .chart polyline { fill: none; stroke-width: 2.5; stroke-linejoin: round; }
 .chart .soft { opacity: .45; }
+.chart circle.hollow { fill: var(--surface); stroke-width: 2.5px; }
+.legend .mk { display: inline-flex; align-items: center; gap: 6px; }
 .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--steel); }
 .legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
 .legend .k-plate { background: var(--plate); }

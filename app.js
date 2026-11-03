@@ -6,11 +6,11 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.0.5";
+var APP_VERSION = "1.1.0";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
-function emptyData() { return { v: 1, actif: null, programmes: {}, liens: {}, seances: {}, pesees: {}, semaines: {} }; }
+function emptyData() { return { v: 1, actif: null, programmes: {}, liens: {}, seances: {}, pesees: {}, semaines: {}, vue: {} }; }
 function normalize(d) {
   var e = emptyData();
   if (!d || typeof d !== "object") return e;
@@ -70,6 +70,51 @@ var MESURES = [["epaules", "Tour d'épaules"], ["bras", "Tour de bras relâché"
 function sessionName(t, date) { return t === "MENSU" && date !== P.debut ? "Mensurations" : P.sessions[t].name; }
 setActive();
 
+/* Séance libre (hors salle) : exercices courants, les mêmes pour tous les athlètes.
+   per : charge notée pour un haltère ; bw : poids de corps (bwf : part du poids de corps comptée) ;
+   time : exercice au temps (lest, durée, marge). Un exercice du programme rejoint la même courbe
+   de progrès quand le programme lui donne le même code (champ « cat »). */
+var CATALOGUE = [
+  { g: "Poussée · pectoraux, épaules", ex: [
+    { k: "dc-barre", n: "Développé couché, barre" },
+    { k: "dc-halt", n: "Développé couché, haltères", per: true },
+    { k: "dm-barre", n: "Développé militaire, barre" },
+    { k: "dm-halt", n: "Développé militaire, haltères", per: true },
+    { k: "dips", n: "Dips", bw: true },
+    { k: "pompes", n: "Pompes", bw: true, bwf: 0.65 },
+    { k: "di-halt", n: "Développé incliné, haltères", per: true },
+    { k: "el-lat", n: "Élévations latérales, haltères", per: true }] },
+  { g: "Tirage · dos", ex: [
+    { k: "tractions", n: "Tractions", bw: true },
+    { k: "row-barre", n: "Rowing, barre" },
+    { k: "row-1b", n: "Rowing un bras, haltère" }] },
+  { g: "Bras", ex: [
+    { k: "curl-barre", n: "Curl biceps, barre" },
+    { k: "curl-halt", n: "Curl biceps, haltères", per: true },
+    { k: "ext-poulie", n: "Extension triceps, poulie" },
+    { k: "ext-halt", n: "Extension triceps, haltère" }] },
+  { g: "Jambes", ex: [
+    { k: "squat", n: "Squat, barre" },
+    { k: "fente-bulg", n: "Fente bulgare", per: true },
+    { k: "sdtr-barre", n: "Soulevé de terre roumain, barre" },
+    { k: "sdtr-halt", n: "Soulevé de terre roumain, haltères", per: true },
+    { k: "sdt", n: "Soulevé de terre" },
+    { k: "hip-thrust", n: "Hip thrust" },
+    { k: "mollets", n: "Mollets" },
+    { k: "kb-swing", n: "Kettlebell swing" }] },
+  { g: "Cou", ex: [
+    { k: "cou", n: "Cou, flexion et extension" }] },
+  { g: "Au temps · durée au lieu des reps", ex: [
+    { k: "gainage", n: "Gainage, planche", time: true },
+    { k: "gainage-lat", n: "Gainage latéral", time: true },
+    { k: "suspension", n: "Suspension à la barre", time: true }] }
+];
+var CAT = {}, CAT_ORDER = {};
+CATALOGUE.forEach(function (g) { g.ex.forEach(function (c) { CAT_ORDER[c.k] = keysOf(CAT).length; CAT[c.k] = c; }); });
+var LIBRE = "LIBRE";
+var LIEUX = [{ v: "maison", l: "À la maison" }, { v: "salle", l: "Autre salle" }, { v: "dehors", l: "Dehors" }];
+var ICON_X = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13"/></svg>';
+
 function b64uToBytes(s) {
   s = s.replace(/-/g, "+").replace(/_/g, "/"); while (s.length % 4) s += "=";
   var bin = atob(s), out = new Uint8Array(bin.length);
@@ -106,7 +151,7 @@ function freezeSession(s, prog) {
   var w = s.semaine || (Math.floor(diffDays(s.date, prog.debut) / 7) + 1);
   s.plan = { name: def.name, short: def.short || def.name, ex: def.ex.map(function (e) {
     var p = presc(e, w); if (!p) return null;
-    return { id: e.id, name: e.name, bw: !!e.bw, step: e.step || 2.5, rest: e.rest, ss: e.ss || "", note: e.note || "", alt: e.alt || [], p: p };
+    return { id: e.id, name: e.name, bw: !!e.bw, cat: e.cat || "", step: e.step || 2.5, rest: e.rest, ss: e.ss || "", note: e.note || "", alt: e.alt || [], p: p };
   }).filter(Boolean) };
   return true;
 }
@@ -155,7 +200,7 @@ function plannedFor(date) {
   list.forEach(function (t) {
     if (t.slice(-1) === "?") {
       var base = t.slice(0, -1), mon = mondayOf(w), done = false;
-      for (var i = 0; i < 7; i++) { var dd = addDays(mon, i); if (dd < date && hasData(seance(dd, base))) done = true; }
+      for (var i = 0; i < 7; i++) { var dd = addDays(mon, i); if (dd < date && (hasData(seance(dd, base)) || replacedDone(dd, base))) done = true; }
       t = done ? "REPOS" : base;
     }
     if (out.indexOf(t) < 0 && P.sessions[t]) out.push(t);
@@ -163,7 +208,7 @@ function plannedFor(date) {
   if (date === P.debut && P.sessions.MENSU) out.unshift("MENSU");
   return out;
 }
-var NOT_DATA = ["date", "type", "semaine", "programme", "checkin", "ajoutee", "maj"];
+var NOT_DATA = ["date", "type", "semaine", "programme", "checkin", "ajoutee", "maj", "libre", "lieu", "remplace", "liste", "nU"];
 function hasData(s) {
   if (!s) return false;
   return keysOf(s).some(function (k) { return NOT_DATA.indexOf(k) < 0 && s[k] !== undefined && s[k] !== null && JSON.stringify(s[k]) !== "{}"; });
@@ -175,12 +220,19 @@ function seance(date, type, create) {
   return D.seances[id];
 }
 function dayDone(date) {
-  var types = plannedFor(date);
-  if (!types || !types.length) return null;
+  var types = plannedFor(date), lib = libreOf(date), libDone = !!(lib && hasData(lib));
+  if (!types || !types.length) return libDone ? true : null;
   var real = types.filter(function (t) { return t !== "REPOS"; });
-  if (!real.length) return null;
-  return real.every(function (t) { return hasData(seance(date, t)); });
+  if (!real.length) return libDone ? true : null;
+  return real.every(function (t) { return hasData(seance(date, t)) || replacedDone(date, t); });
 }
+/* Séance libre du jour et séance prévue qu'elle remplace */
+function libreOf(date) { return D.seances[seanceId(date, LIBRE)]; }
+function isReplaced(date, t) { var l = libreOf(date); return !!(l && l.remplace === t); }
+function replacedDone(date, t) { var l = libreOf(date); return !!(l && l.remplace === t && hasData(l)); }
+function lieuLabel(v) { for (var i = 0; i < LIEUX.length; i++) if (LIEUX[i].v === v) return LIEUX[i].l; return "Hors salle"; }
+function shortName(t) { var d = P.sessions[t]; return d ? d.short || d.name : t; }
+function libreSub(s) { return lieuLabel(s.lieu) + (s.remplace ? " · remplace " + shortName(s.remplace) : ""); }
 
 /* ================= Charges ================= */
 function presc(e, w) {
@@ -373,8 +425,9 @@ function viewJour() {
   if (date >= P.debut && date <= lastDay()) h += weightSheet(date);
   var types = (plan || []).slice();
   valuesOf(D.seances).forEach(function (s) { if (s.date === date && types.indexOf(s.type) < 0 && P.sessions[s.type]) types.push(s.type); });
-  if (!types.length && plan !== null) h += '<div class="sheet"><h2>Rien de prévu</h2><p class="small muted">Ce jour est en dehors du bloc. Tu peux quand même ajouter une séance ci-dessous.</p></div>';
-  types.forEach(function (t) { h += sessionSheet(date, t, w); });
+  if (!types.length && plan !== null && !libreOf(date)) h += '<div class="sheet"><h2>Rien de prévu</h2><p class="small muted">Ce jour est en dehors du bloc. Tu peux quand même ajouter une séance ci-dessous.</p></div>';
+  types.forEach(function (t) { if (!isReplaced(date, t)) h += sessionSheet(date, t, w); });
+  if (libreOf(date)) h += libreSheet(date);
   h += addSheet(date, types);
   h += claudeSheet("jour");
   return h;
@@ -403,7 +456,8 @@ function weightSheet(date) {
 }
 function addSheet(date, types) {
   var opts = keysOf(P.sessions).filter(function (t) { return types.indexOf(t) < 0; });
-  return '<label class="field" for="add-s"><span>Séance faite un autre jour, rattrapage ou séance en plus</span><select id="add-s" data-act="add"><option value="">Ajouter une séance à ce jour</option>' +
+  return '<label class="field" for="add-s"><span>Séance faite un autre jour, rattrapage, séance en plus ou séance libre</span><select id="add-s" data-act="add"><option value="">Ajouter une séance à ce jour</option>' +
+    (libreOf(date) ? "" : '<option value="' + LIBRE + '">Séance libre (hors salle)</option>') +
     opts.map(function (t) { return '<option value="' + t + '">' + esc(sessionName(t, date)) + "</option>"; }).join("") + "</select></label>";
 }
 function sessionSheet(date, type, w) {
@@ -411,6 +465,7 @@ function sessionSheet(date, type, w) {
   if (s.arret && s.arret.motif) st = '<span class="state warn">Terminée plus tôt</span>';
   else st = hasData(s) ? '<span class="state done">Notée</span>' : '<span class="state">À faire</span>';
   var h = '<section class="sheet"><div class="sheet-head"><h2>' + esc(s.plan ? s.plan.name : sessionName(type, date)) + "</h2>" + (def.kind === "repos" ? "" : st) + "</div>";
+  if (def.kind === "muscu" && !hasData(s) && !libreOf(date)) h += '<div class="note info stack"><p><b>Pas à ta salle aujourd\'hui ?</b> Compose une séance avec le matériel que tu as sous la main.</p><div><button type="button" class="btn primary small" data-act="librestart" data-t="' + esc(type) + '">Faire une séance libre</button></div></div>';
   if (def.kind === "muscu") h += bodyMuscu(date, def, w, s, id);
   else if (def.kind === "course") h += bodyCourse(date, def, w, s, id);
   else if (def.kind === "sport") h += bodySport(def, s, id);
@@ -509,6 +564,187 @@ function bilan(s, id, full) {
   h += '<label class="field"><span>Remarques</span>' + txt("seances", id, "bilan.note", b.note, "Facultatif : sensations, exercice à changer, machine prise…") + "</label>";
   return h + "</div>";
 }
+/* ---------- Séance libre (hors salle) ---------- */
+function rowsFor(c, obj) { return c && c.time ? valuesOf(obj).filter(function (r) { return r && toNum(r.t); }) : rowsOk(obj); }
+function bestRow(c, rows) {
+  var best = null, score = -1;
+  rows.forEach(function (r) {
+    var v = c && c.time ? toNum(r.t) : e1rm(toNum(r.c) + (c && c.bw ? 75 : 0), toNum(r.r), toNum(r.rir) !== null ? toNum(r.rir) : 2);
+    if (v > score) { score = v; best = r; }
+  });
+  return best;
+}
+/* Exercice du programme noté dans une séance (consignes figées en priorité, code « cat » du programme) */
+function progEx(s, id) {
+  var prog = D.programmes[s.programme], def = prog && prog.sessions ? prog.sessions[s.type] : null;
+  var pe = def && def.ex ? def.ex.filter(function (e) { return e.id === id; })[0] : null;
+  var fe = s.plan ? s.plan.ex.filter(function (e) { return e.id === id; })[0] : null;
+  var e = fe || pe; if (!e) return null;
+  return { id: id, name: e.name, bw: !!e.bw, cat: (fe && fe.cat) || (pe && pe.cat) || "" };
+}
+function catRows(s, k) {
+  var out = [];
+  if (s.type === LIBRE) (s.liste || []).forEach(function (it) { if (it.k === k && s.sets && s.sets[it.u]) out = out.concat(rowsFor(CAT[k], s.sets[it.u])); });
+  else if (s.sets) keysOf(s.sets).forEach(function (exId) { var e = progEx(s, exId); if (e && e.cat === k) out = out.concat(rowsOk(s.sets[exId])); });
+  return out;
+}
+function byDateDesc(a, b) { return a.date < b.date ? 1 : -1; }
+function lastCat(k, before) {
+  var list = valuesOf(D.seances).filter(function (s) { return s.date < before; }).sort(byDateDesc);
+  for (var i = 0; i < list.length; i++) { var rows = catRows(list[i], k); if (rows.length) return { date: list[i].date, rows: rows, best: bestRow(CAT[k], rows), salle: list[i].type !== LIBRE }; }
+  return null;
+}
+function lastAutre(nom, before) {
+  var key = String(nom).trim().toLowerCase();
+  var list = valuesOf(D.seances).filter(function (s) { return s.date < before && s.type === LIBRE; }).sort(byDateDesc);
+  for (var i = 0; i < list.length; i++) {
+    var s = list[i], rows = [];
+    (s.liste || []).forEach(function (it) { if (it.k === "autre" && String(it.nom || "").trim().toLowerCase() === key && s.sets && s.sets[it.u]) rows = rows.concat(rowsOk(s.sets[it.u])); });
+    if (rows.length) return { date: s.date, rows: rows, best: bestRow(null, rows), salle: false };
+  }
+  return null;
+}
+function perfText(c, r) {
+  if (!r) return "";
+  if (c && c.time) return (toNum(r.c) ? "+" + fmt(toNum(r.c)) + " kg, " : "") + fmt(toNum(r.t), 0) + " s" + (toNum(r.m) !== null ? ", marge " + fmt(toNum(r.m), 0) + " s" : "");
+  var load = c && c.bw ? (toNum(r.c) > 0 ? "+" + fmt(toNum(r.c)) + " kg" : "poids de corps") : fmt(toNum(r.c)) + " kg";
+  return load + " × " + fmt(toNum(r.r), 0) + (toNum(r.rir) !== null ? ", RIR " + fmt(toNum(r.rir)) : "");
+}
+function libreName(it) { var c = CAT[it.k]; return c ? c.n : it.k === "autre" ? (it.nom || "Autre exercice") : "Exercice"; }
+function libreSheet(date) {
+  var s = libreOf(date), id = seanceId(date, LIBRE), liste = s.liste || [], st;
+  if (s.arret && s.arret.motif) st = '<span class="state warn">Terminée plus tôt</span>';
+  else st = hasData(s) ? '<span class="state done">Notée</span>' : '<span class="state alt">Hors salle</span>';
+  var h = '<section class="sheet" id="libre"><div class="sheet-head"><div class="titled"><h2>Séance libre</h2><span class="small muted">' + esc(libreSub(s)) + "</span></div>" + st + "</div>";
+  h += '<div><button type="button" class="linkbtn" data-act="libreedit">Modifier le lieu ou la séance remplacée</button></div>';
+  if (s.arret && s.arret.motif) h += '<div class="note warn"><b>Séance terminée plus tôt</b> (' + esc(motifLabel(MOTIFS_ARRET, s.arret.motif)) + ").</div>";
+  h += checkin(s, id);
+  h += '<div class="hr"></div><div class="section"><h3>Exercices</h3><p class="small muted">Ajoute les exercices dans l\'ordre où tu les fais. Pour chaque série : charge, reps faites et RIR ressenti (répétitions que tu aurais encore pu faire).</p>' +
+    (liste.length ? "" : '<p class="small muted">Aucun exercice pour l\'instant.</p>') + "</div>";
+  liste.forEach(function (it, i) { h += libreEx(s, id, it, i, date); });
+  h += '<button type="button" class="btn outline wide" data-act="libreadd" data-id="' + esc(id) + '">Ajouter un exercice</button>';
+  h += '<div class="hr"></div>' + arretBlock(s, id) + bilan(s, id, true);
+  return h + "</section>";
+}
+function libreEx(s, id, it, i, date) {
+  var c = CAT[it.k] || null, time = !!(c && c.time), rows = (s.sets && s.sets[it.u]) || {}, n = Math.max(time ? 2 : 3, keysOf(rows).length), name = libreName(it);
+  var h = '<div class="ex" id="ex-' + esc(it.u) + '"><div class="ex-title"><h3><span class="ex-code">' + (i + 1) + "</span>" + esc(name) + '</h3><button type="button" class="icon-btn" data-act="librerm" data-id="' + esc(id) + '" data-u="' + esc(it.u) + '" aria-label="Retirer ' + esc(name) + ' de la séance">' + ICON_X + "</button></div>";
+  if (it.k === "autre") h += '<label class="field"><span>Nom de l\'exercice</span>' + inp("seances", id, "liste." + i + ".nom", it.nom, 'placeholder="ex. Rotation externe à l\'élastique"') + '</label><p class="small muted">Noté dans le journal et le résumé pour Claude, mais pas dans les courbes de Progrès.</p>';
+  var last = it.k === "autre" ? (it.nom ? lastAutre(it.nom, date) : null) : c ? lastCat(it.k, date) : null;
+  h += '<p class="advice">' + (last ? "Dernière fois : " + esc(perfText(c, last.best)) + ' <span class="muted">(' + esc(fmtShort(last.date)) + (last.salle ? ", à la salle" : "") + ")</span>"
+    : time ? "Première fois : note la durée tenue et la marge qu'il te restait." : "Première fois sur cet exercice : choisis une charge qui laisse 2 répétitions en réserve.") + "</p>";
+  h += libreRows(id, it.u, rows, n, c, last);
+  if (c && c.bw) h += '<p class="tiny muted">Poids de corps : mets 0 dans Lest. ' + (c.bwf ? "Les deux tiers de ton poids du jour sont comptés" : "Ton poids du jour est compté") + " dans la force estimée.</p>";
+  if (time) h += '<p class="tiny muted">Marge : combien de secondes tu aurais encore pu tenir, comme le RIR.</p>';
+  return h + '<div><button type="button" class="btn small quiet" data-act="addset" data-id="' + esc(id) + '" data-base="sets.' + esc(it.u) + "." + n + '">Ajouter une série</button></div></div>';
+}
+function libreRows(id, u, rows, n, c, last) {
+  var time = !!(c && c.time), bw = !!(c && c.bw), f = time ? ["c", "t", "m"] : ["c", "r", "rir"];
+  var heads = time ? ["Lest (kg)", "Durée (s)", "Marge (s)"] : [bw ? "Lest (kg)" : c && c.per ? "kg / haltère" : "Charge (kg)", "Reps", "RIR"];
+  var aria = time ? ["lest en kg", "durée en secondes", "marge en secondes"] : [bw ? "lest en kg" : "charge en kg", "répétitions", "RIR"];
+  var ph = time ? ["kg", "s", "s"] : ["kg", "reps", "RIR"], modes = time ? ["decimal", "numeric", "numeric"] : ["decimal", "numeric", "decimal"];
+  var h = '<div class="sets"><div class="set-head"><span></span><span>' + heads.join("</span><span>") + "</span><span></span></div>";
+  for (var i = 0; i < n; i++) {
+    var row = rows[i] || {}, src = i > 0 ? rows[i - 1] : (last ? last.best : null), b = "sets." + u + "." + i + ".";
+    var ok = src && f.some(function (k) { return toNum(src[k]) !== null; });
+    h += '<div class="set"><span class="i">' + (i + 1) + "</span>";
+    f.forEach(function (k, j) { var pv = ok && toNum(src[k]) !== null ? fmt(toNum(src[k])) : ph[j]; h += inp("seances", id, b + k, row[k], 'inputmode="' + modes[j] + '" aria-label="Série ' + (i + 1) + ", " + aria[j] + '" placeholder="' + esc(pv) + '"'); });
+    h += ok ? '<button type="button" class="fill" data-act="fillvals" data-id="' + esc(id) + '" data-base="' + b + '" data-v="' + f.map(function (k) { return k + "=" + (toNum(src[k]) !== null ? toNum(src[k]) : ""); }).join(";") + '" aria-label="Série ' + (i + 1) + ' : reprendre ' + (i > 0 ? "la série précédente" : "ta dernière performance") + '">= préc.</button>' : "<span></span>";
+    h += "</div>";
+  }
+  return h + "</div>";
+}
+function libreCandidates(date) { return (plannedFor(date) || []).filter(function (t) { return P.sessions[t] && P.sessions[t].kind === "muscu" && !hasData(seance(date, t)); }); }
+function openSheet(html, onAct, tall) {
+  var back = document.getElementById("dialog");
+  back.innerHTML = '<div class="dialog' + (tall ? " tall" : "") + '" role="dialog" aria-modal="true" aria-labelledby="dlg-t">' + html + "</div>";
+  back.hidden = false;
+  function close() { back.hidden = true; back.innerHTML = ""; }
+  back.onclick = function (ev) {
+    if (ev.target === back) { close(); return; }
+    var b = ev.target.closest("[data-sh]"); if (b && !b.disabled) onAct(b, close, back);
+  };
+  var t = back.querySelector("#dlg-t"); if (t) { t.setAttribute("tabindex", "-1"); t.focus(); }
+  return close;
+}
+function libreDialog(date, preT) {
+  var cur = libreOf(date), cands = libreCandidates(date);
+  var st = { lieu: cur ? cur.lieu || "maison" : "maison", remplace: cur ? cur.remplace || "" : (preT && cands.indexOf(preT) >= 0 ? preT : "") };
+  function draw() {
+    var h = '<h2 id="dlg-t">Séance libre</h2><p class="small muted">Pour t\'entraîner hors de ta salle. Tu ajoutes les exercices un par un, puis tu notes charge, reps et RIR comme d\'habitude.</p>';
+    h += '<div class="scale"><div class="scale-q"><span>Où t\'entraînes-tu ?</span></div><div class="seg" role="group">' + LIEUX.map(function (o) { return '<button type="button" data-sh="lieu" data-v="' + o.v + '" aria-pressed="' + (st.lieu === o.v) + '">' + esc(o.l) + "</button>"; }).join("") + "</div></div>";
+    if (cands.length) {
+      var one = cands.length === 1;
+      h += '<div class="scale"><div class="scale-q"><span>' + (one ? "Et la séance prévue, " + esc(shortName(cands[0])) + " ?" : "Et les séances prévues ?") + '</span></div><div class="seg stack" role="group">';
+      cands.forEach(function (t) { h += '<button type="button" data-sh="remp" data-v="' + esc(t) + '" aria-pressed="' + (st.remplace === t) + '">' + (one ? "Remplacée par cette séance libre" : "Remplace " + esc(shortName(t))) + "</button>"; });
+      h += '<button type="button" data-sh="remp" data-v="" aria-pressed="' + (st.remplace === "") + '">' + (one ? "Je la ferai un autre jour" : "Aucune, je les ferai un autre jour") + "</button></div>";
+      h += '<p class="small muted">' + (st.remplace ? esc(shortName(st.remplace)) + " comptera comme faite cette semaine. La suite du programme ne change pas." : "La séance prévue reste à faire : tu pourras l'ajouter un autre jour avec «\u00a0Ajouter une séance\u00a0».") + "</p></div>";
+    }
+    h += '<div class="row"><button type="button" class="btn primary grow" data-sh="ok">' + (cur ? "Enregistrer" : "Commencer") + '</button><button type="button" class="btn quiet" data-sh="cancel">Annuler</button></div>';
+    if (cur) h += '<div><button type="button" class="btn small quiet danger" data-sh="del">Supprimer cette séance libre</button></div>';
+    return h;
+  }
+  function del() { delete D.seances[seanceId(date, LIBRE)]; persist(); render(); toast("Séance libre supprimée."); }
+  openSheet(draw(), function (b, close, back) {
+    var a = b.dataset.sh;
+    if (a === "lieu" || a === "remp") {
+      if (a === "lieu") st.lieu = b.dataset.v; else st.remplace = b.dataset.v;
+      back.querySelector(".dialog").innerHTML = draw();
+      var again = back.querySelector('[data-sh="' + a + '"][data-v="' + b.dataset.v + '"]'); if (again) again.focus();
+    } else if (a === "cancel") close();
+    else if (a === "ok") {
+      close();
+      var s = seance(date, LIBRE, true); s.libre = true; s.lieu = st.lieu;
+      if (st.remplace) s.remplace = st.remplace; else delete s.remplace;
+      if (!s.liste) s.liste = [];
+      persist(); render();
+      if (!cur) { var el = document.getElementById("libre"); if (el) el.scrollIntoView({ block: "start" }); libreMenu(seanceId(date, LIBRE)); }
+    } else if (a === "del") {
+      close();
+      if (hasData(cur)) dialog("Supprimer la séance libre ?", '<p class="small">Les séries et le bilan notés dans cette séance seront effacés.</p>', [{ label: "Supprimer", cls: "danger", run: del }, { label: "Annuler", cls: "primary" }]);
+      else del();
+    }
+  });
+}
+function libreMenu(id) {
+  var date = id.slice(0, id.lastIndexOf("_")), s = D.seances[id], present = {};
+  if (!s) return;
+  (s.liste || []).forEach(function (it) { present[it.k] = true; });
+  var h = '<h2 id="dlg-t">Ajouter un exercice</h2><p class="small muted">Touche un exercice pour l\'ajouter à la fin de la séance.</p>';
+  CATALOGUE.forEach(function (g) {
+    h += '<div class="menu-group"><h3>' + esc(g.g) + "</h3>";
+    g.ex.forEach(function (c) {
+      var last = present[c.k] ? null : lastCat(c.k, date);
+      h += '<button type="button" class="pick" data-sh="pick" data-k="' + c.k + '"' + (present[c.k] ? " disabled" : "") + "><span>" + esc(c.n) + '</span><span class="meta">' + (present[c.k] ? "dans la séance" : last ? esc(fmtShort(last.date)) : "") + "</span></button>";
+    });
+    h += "</div>";
+  });
+  h += '<div class="menu-group"><h3>Pas dans la liste</h3><button type="button" class="pick" data-sh="pick" data-k="autre"><span>Autre exercice…</span><span class="meta">non suivi dans Progrès</span></button></div>';
+  h += '<div><button type="button" class="btn wide" data-sh="cancel">Fermer</button></div>';
+  openSheet(h, function (b, close) {
+    close();
+    if (b.dataset.sh !== "pick") return;
+    var doc = D.seances[id]; if (!doc) return;
+    if (!doc.liste) doc.liste = [];
+    doc.nU = (doc.nU || 0) + 1;
+    var u = "lx" + doc.nU, k = b.dataset.k;
+    doc.liste.push({ u: u, k: k }); persist(); render();
+    var el = document.getElementById("ex-" + u);
+    if (el) { el.scrollIntoView({ block: "center" }); var f = el.querySelector("input"); if (f && k === "autre") f.focus(); }
+  }, true);
+}
+function libreRemove(id, u) {
+  var doc = D.seances[id]; if (!doc) return;
+  var rows = doc.sets && doc.sets[u] ? valuesOf(doc.sets[u]) : [];
+  var noted = rows.some(function (r) { return r && (toNum(r.c) !== null || toNum(r.r) !== null || toNum(r.t) !== null); });
+  function rm() {
+    doc.liste = (doc.liste || []).filter(function (it) { return it.u !== u; });
+    if (doc.sets) { delete doc.sets[u]; if (!keysOf(doc.sets).length) delete doc.sets; }
+    persist(); render();
+  }
+  if (noted) dialog("Retirer cet exercice ?", '<p class="small">Les séries notées pour cet exercice seront effacées.</p>', [{ label: "Retirer", cls: "danger", run: rm }, { label: "Annuler", cls: "primary" }]);
+  else rm();
+}
 function paceStr(kmh) { var m = 60 / kmh, mm = Math.floor(m), ss = Math.round((m - mm) * 60); if (ss === 60) { mm++; ss = 0; } return mm + ":" + pad(ss); }
 function bodyCourse(date, def, w, s, id) {
   var plan = def.plan[w - 1] || def.plan[def.plan.length - 1], h = "";
@@ -564,8 +800,10 @@ function viewSemaine() {
   if (sports.length) sheet += '<p class="small muted">Intensité des séances de ' + esc((P.sessions.SAMBO && P.sessions.SAMBO.name || "sport").toLowerCase()) + " : " + esc(sports.map(function (s) { return s.intensite.toLowerCase(); }).join(", ")) + ".</p>";
   h += sheet + '</div><div class="sheet"><div class="weeklist">';
   for (var i = 0; i < 7; i++) {
-    var d = addDays(mon, i), types = plannedFor(d), done = dayDone(d);
-    var label = types === null ? "Selon l'organisation de la semaine" : types.length ? types.map(function (t) { return P.sessions[t].short || P.sessions[t].name; }).join(" et ") : "Rien de prévu";
+    var d = addDays(mon, i), types = plannedFor(d), done = dayDone(d), lib = libreOf(d);
+    var names = (types || []).map(function (t) { return isReplaced(d, t) ? "Séance libre" : P.sessions[t].short || P.sessions[t].name; });
+    if (lib && !(types || []).some(function (t) { return isReplaced(d, t); })) names.push("Séance libre");
+    var label = types === null ? "Selon l'organisation de la semaine" + (lib ? ", séance libre" : "") : names.length ? names.join(" et ") : "Rien de prévu";
     h += '<button type="button" class="wrow' + (d === todayStr() ? " today" : "") + '" data-act="goto" data-date="' + d + '"><span class="d">' + esc(fmtDayName(d)) + " " + parse(d).getDate() + "</span><span>" + esc(label) + '</span><span class="tick' + (done ? " done" : "") + '" aria-label="' + (done ? "fait" : "à faire") + '"></span></button>';
   }
   h += "</div></div>";
@@ -586,13 +824,7 @@ function viewProgres() {
   var avgs = []; for (var w = 1; w <= P.semaines; w++) { var a = weekAvgWeight(w); if (a) avgs.push({ x: addDays(mondayOf(w), 3), y: a }); }
   h += '<section class="sheet"><h2>Poids</h2>' + (weights.length ? chart([{ pts: weights, cls: "s-steel", dots: true, line: false, soft: true }, { pts: avgs, cls: "s-plate", dots: true, line: true }], { unit: "kg", ref: P.poidsMax ? [{ y: P.poidsMax, label: fmt(P.poidsMax) + " kg, plafond" }] : [] }) +
     '<div class="legend"><span><i class="k-steel"></i>pesées</span><span><i class="k-plate"></i>moyenne de la semaine</span></div>' : '<p class="small muted">Pas encore de pesée. Note ton poids chaque matin dans Aujourd\'hui.</p>') + "</section>";
-  var tracked = [], classes = ["s-plate", "s-ink", "s-steel"], keys = ["k-plate", "k-ink", "k-steel"];
-  keysOf(P.sessions).forEach(function (k) { var s = P.sessions[k]; if (s.kind === "muscu") s.ex.forEach(function (e) { if (e.suivi && tracked.length < 3) tracked.push(e); }); });
-  var series = tracked.map(function (e, i) { return { e: e, cls: classes[i], key: keys[i], pts: e1rmSeries(e) }; });
-  var any = series.some(function (s) { return s.pts.length; });
-  h += '<section class="sheet"><h2>Force estimée (1RM)</h2>' + (any ? chart(series.map(function (s) { return { pts: s.pts, cls: s.cls, dots: true, line: true }; }), { unit: "kg" }) +
-    '<div class="legend">' + series.map(function (s) { return '<span><i class="' + s.key + '"></i>' + esc(s.e.name) + (s.pts.length ? " : " + fmt(s.pts[s.pts.length - 1].y) + " kg" : "") + "</span>"; }).join("") + "</div>" : '<p class="small muted">La courbe apparaît après ta première séance notée.</p>') +
-    '<p class="tiny muted">Calcul : charge × (1 + (reps + RIR) ÷ 30), meilleure série de chaque séance. Pour les tractions et les dips, le poids de corps est compris.</p></section>';
+  h += forceSheet();
   var list = valuesOf(D.seances).filter(hasData).sort(function (a, b) { return a.date < b.date ? 1 : -1; }).slice(0, 40);
   h += mensuSheet();
   h += '<section class="sheet"><h2>Séances notées</h2><div class="log">' + (list.length ? list.map(logItem).join("") : '<p class="small muted">Aucune séance notée pour l\'instant.</p>') + "</div></section>";
@@ -622,27 +854,105 @@ function mensuSheet() {
   return h + '<p class="tiny muted">Mesure toujours le matin à jeun, avant l\'entraînement, au même endroit et de la même façon. Une courbe apparaît dès la deuxième mesure.</p></section>';
 }
 function logItem(s) {
-  var def = P.sessions[s.type], r = readiness(s.checkin), b = s.bilan || {}, chips = [];
+  var def = P.sessions[s.type], r = readiness(s.checkin), b = s.bilan || {}, chips = [], isLib = s.type === LIBRE;
+  if (isLib) { chips.push('<span class="state alt">hors salle</span>'); var nx = (s.liste || []).length; if (nx) chips.push('<span class="state">' + nx + " exercice" + (nx > 1 ? "s" : "") + "</span>"); }
   if (r) chips.push('<span class="state ' + (r.level === "ok" ? "done" : "warn") + '">forme ' + fmt(r.avg, 1) + "</span>");
   if (b.rpe) chips.push('<span class="state">difficulté ' + b.rpe + "</span>");
   if (s.intensite) chips.push('<span class="state">' + esc(s.intensite.toLowerCase()) + "</span>");
   if (s.arret && s.arret.motif) chips.push('<span class="state warn">arrêtée, ' + esc(motifLabel(MOTIFS_ARRET, s.arret.motif)) + "</span>");
   if (s.mods && keysOf(s.mods).length) chips.push('<span class="state alt">' + keysOf(s.mods).length + " exercice" + (keysOf(s.mods).length > 1 ? "s" : "") + " changé" + (keysOf(s.mods).length > 1 ? "s" : "") + "</span>");
   var pains = b.douleurs ? keysOf(b.douleurs).filter(function (k) { return b.douleurs[k]; }) : [];
-  return '<button type="button" class="log-item linkless" data-act="goto" data-date="' + s.date + '"><div class="row"><b>' + esc(fmtShort(s.date)) + ", " + esc(s.plan ? s.plan.short : def ? def.short || def.name : s.type) + '</b><span class="row">' + chips.join("") + "</span></div>" +
-    (pains.length ? '<span class="pain">Douleurs : ' + esc(pains.map(function (k) { return labelZone(k); }).join(", ")) + "</span>" : "") + (b.note ? '<span class="small muted">' + esc(b.note) + "</span>" : "") + "</button>";
+  return '<button type="button" class="log-item linkless" data-act="goto" data-date="' + s.date + '"><div class="row"><b>' + esc(fmtShort(s.date)) + ", " + esc(isLib ? "Séance libre" : s.plan ? s.plan.short : def ? def.short || def.name : s.type) + '</b><span class="row">' + chips.join("") + "</span></div>" +
+    (isLib ? '<span class="small muted">' + esc(libreSub(s)) + "</span>" : "") + (pains.length ? '<span class="pain">Douleurs : ' + esc(pains.map(function (k) { return labelZone(k); }).join(", ")) + "</span>" : "") + (b.note ? '<span class="small muted">' + esc(b.note) + "</span>" : "") + "</button>";
 }
 function labelZone(k) { for (var i = 0; i < DOULEURS.length; i++) if (zk(DOULEURS[i]) === k) return DOULEURS[i].toLowerCase(); return k; }
-function e1rmSeries(e) {
-  return valuesOf(D.seances).filter(function (s) { return s.sets && s.sets[e.id]; }).sort(function (a, b) { return a.date < b.date ? -1 : 1; }).map(function (s) {
-    var bw = e.bw ? bodyweight(s.date) : 0, best = 0;
-    rowsOk(s.sets[e.id]).forEach(function (r) { var rir = toNum(r.rir) !== null ? toNum(r.rir) : 2; best = Math.max(best, e1rm(toNum(r.c) + bw, toNum(r.r), rir)); });
-    return best ? { x: s.date, y: best } : null;
-  }).filter(Boolean);
+/* Courbes de force : une par exercice. Clé « cat:<code> » pour un exercice de la liste commune
+   (séances libres et exercices du programme qui portent ce code), « ex:<id> » pour un exercice
+   du programme actif sans code. Les exercices au temps et les « autres exercices » n'ont pas de courbe. */
+function progOrder(id) {
+  var n = 0, found = -1;
+  keysOf(P.sessions).forEach(function (k) { var s = P.sessions[k]; if (s.kind === "muscu") s.ex.forEach(function (e) { if (e.id === id && found < 0) found = n; n++; }); });
+  return found < 0 ? 999 : found;
+}
+function progName(id, fallback) {
+  var name = fallback;
+  keysOf(P.sessions).forEach(function (k) { var s = P.sessions[k]; if (s.kind === "muscu") s.ex.forEach(function (e) { if (e.id === id) name = e.name; }); });
+  return name;
+}
+function curveIndex() {
+  var idx = {};
+  function add(key, name, order, bw, bwf, s, rows, hollow) {
+    if (!rows.length) return;
+    var bwv = bw ? bodyweight(s.date) * (bwf || 1) : 0, best = 0;
+    rows.forEach(function (r) { var rir = toNum(r.rir) !== null ? toNum(r.rir) : 2; best = Math.max(best, e1rm(toNum(r.c) + bwv, toNum(r.r), rir)); });
+    if (!best) return;
+    var c = idx[key] || (idx[key] = { key: key, name: name, order: order, byDate: {} }), prev = c.byDate[s.date];
+    if (!prev || best > prev.y) c.byDate[s.date] = { x: s.date, y: best, hollow: hollow };
+  }
+  valuesOf(D.seances).forEach(function (s) {
+    if (!s.sets) return;
+    if (s.type === LIBRE) {
+      (s.liste || []).forEach(function (it) { var c = CAT[it.k]; if (c && !c.time && s.sets[it.u]) add("cat:" + it.k, c.n, CAT_ORDER[it.k], c.bw, c.bwf, s, rowsOk(s.sets[it.u]), true); });
+      return;
+    }
+    keysOf(s.sets).forEach(function (exId) {
+      var e = progEx(s, exId); if (!e) return;
+      if (e.cat && CAT[e.cat]) add("cat:" + e.cat, CAT[e.cat].n, CAT_ORDER[e.cat], e.bw, CAT[e.cat].bwf, s, rowsOk(s.sets[exId]), false);
+      else if (s.programme === P.id) add("ex:" + exId, progName(exId, e.name), 100 + progOrder(exId), e.bw, 1, s, rowsOk(s.sets[exId]), false);
+    });
+  });
+  keysOf(idx).forEach(function (k) { idx[k].pts = keysOf(idx[k].byDate).sort().map(function (d) { return idx[k].byDate[d]; }); });
+  return idx;
+}
+function curveKeyOf(e) { return e.cat && CAT[e.cat] ? "cat:" + e.cat : "ex:" + e.id; }
+function curveName(k, idx) {
+  if (idx[k]) return idx[k].name;
+  if (k.indexOf("cat:") === 0) return CAT[k.slice(4)] ? CAT[k.slice(4)].n : null;
+  var id = k.slice(3), n = progName(id, null); return n;
+}
+function selectedCurves() {
+  if (D.vue && D.vue.courbes) {
+    var seen = [];
+    D.vue.courbes.forEach(function (k) {
+      if (k.indexOf("ex:") === 0) keysOf(P.sessions).forEach(function (sk) { var s = P.sessions[sk]; if (s.kind === "muscu") s.ex.forEach(function (e) { if (e.id === k.slice(3)) k = curveKeyOf(e); }); });
+      if (seen.indexOf(k) < 0) seen.push(k);
+    });
+    return seen;
+  }
+  var out = [];
+  keysOf(P.sessions).forEach(function (k) { var s = P.sessions[k]; if (s.kind === "muscu") s.ex.forEach(function (e) { var key = curveKeyOf(e); if (e.suivi && out.indexOf(key) < 0) out.push(key); }); });
+  return out.slice(0, 4);
+}
+function signed(v, d) { return (v > 0 ? "+" : v < 0 ? "−" : "") + fmt(Math.abs(v), d); }
+function forceSheet() {
+  var idx = curveIndex(), sel = selectedCurves().filter(function (k) { return curveName(k, idx); }), mode = D.vue && D.vue.mode === "kg" ? "kg" : "pct";
+  var avail = keysOf(idx).sort(function (a, b) { return idx[a].order - idx[b].order || (idx[a].name < idx[b].name ? -1 : 1); });
+  sel.forEach(function (k) { if (avail.indexOf(k) < 0) avail.push(k); });
+  var h = '<section class="sheet"><h2>Force estimée (1RM)</h2>';
+  if (!keysOf(idx).length) return h + '<p class="small muted">La courbe apparaît après ta première séance notée.</p></section>';
+  h += '<div class="scale"><div class="scale-q"><span>Courbes affichées, 4 au plus</span></div><div class="seg chips" role="group">' + avail.map(function (k) { return '<button type="button" data-act="courbe" data-k="' + esc(k) + '" aria-pressed="' + (sel.indexOf(k) >= 0) + '">' + esc(curveName(k, idx)) + "</button>"; }).join("") + "</div></div>";
+  h += '<div class="scale"><div class="scale-q"><span>Afficher</span></div><div class="seg" role="group"><button type="button" data-act="courbemode" data-v="pct" aria-pressed="' + (mode === "pct") + '">Évolution en %</button><button type="button" data-act="courbemode" data-v="kg" aria-pressed="' + (mode === "kg") + '">En kg</button></div></div>';
+  var classes = ["s-plate", "s-ink", "s-steel", "s-c4"], keys = ["k-plate", "k-ink", "k-steel", "k-c4"];
+  var series = sel.map(function (k, i) {
+    var raw = idx[k] ? idx[k].pts : [], base = raw.length ? raw[0].y : 1;
+    return { name: curveName(k, idx), cls: classes[i], key: keys[i], raw: raw, pts: mode === "pct" ? raw.map(function (p) { return { x: p.x, y: (p.y / base - 1) * 100, hollow: p.hollow }; }) : raw };
+  });
+  if (!sel.length) h += '<p class="small muted">Choisis au moins une courbe ci-dessus.</p>';
+  else if (!series.some(function (s) { return s.pts.length; })) h += '<p class="small muted">Pas encore de séance notée sur ces exercices.</p>';
+  else {
+    h += chart(series.map(function (s) { return { pts: s.pts, cls: s.cls, dots: true, line: true }; }), mode === "pct" ? { unit: "%", ref: [{ y: 0, label: "départ" }], tick: function (v) { return signed(v, 0) + "\u00a0%"; } } : { unit: "kg" });
+    h += '<div class="legend">' + series.map(function (s) {
+      if (!s.raw.length) return '<span><i class="' + s.key + '"></i>' + esc(s.name) + " : pas encore noté</span>";
+      var last = s.raw[s.raw.length - 1].y;
+      return '<span><i class="' + s.key + '"></i>' + esc(s.name) + " : " + (mode === "pct" ? signed(s.pts[s.pts.length - 1].y, 1) + " % (" + fmt(last) + " kg)" : fmt(last) + " kg") + "</span>";
+    }).join("") + "</div>";
+    if (series.some(function (s) { return s.pts.some(function (p) { return p.hollow; }); })) h += '<div class="legend"><span class="mk"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4.5" fill="currentColor"/></svg>à la salle</span><span class="mk"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4" fill="none" stroke="currentColor" stroke-width="2"/></svg>séance libre</span></div>';
+  }
+  return h + '<p class="tiny muted">Calcul : charge × (1 + (reps + RIR) ÷ 30), meilleure série de chaque séance. Pour les tractions et les dips, le poids de corps est compris (les deux tiers pour les pompes). En %, chaque courbe part de ta première séance sur l\'exercice. Les exercices au temps et les «\u00a0autres exercices\u00a0» ne sont pas suivis ici.</p></section>';
 }
 function niceStep(raw) { var p = Math.pow(10, Math.floor(Math.log10(raw || 1))), n = raw / p; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p; }
 function chart(series, opt) {
-  var W = 600, H = 210, L = 40, R = 14, T = 14, B = 28;
+  var W = 600, H = 210, L = opt.tick ? 48 : 40, R = 14, T = 14, B = 28, tick = opt.tick || function (v) { return fmt(v); };
   var pts = []; series.forEach(function (s) { pts = pts.concat(s.pts); });
   var ys = pts.map(function (p) { return p.y; }).concat((opt.ref || []).map(function (r) { return r.y; }));
   var x0 = P.debut, x1 = lastDay();
@@ -653,12 +963,12 @@ function chart(series, opt) {
   function X(x) { return L + diffDays(x, x0) / span * (W - L - R); }
   function Y(y) { return T + (1 - (y - y0) / (y1 - y0)) * (H - T - B); }
   var g = "", step = niceStep((y1 - y0) / 4);
-  for (var v = Math.ceil(y0 / step) * step; v <= y1; v += step) g += '<line class="grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(v) + '" y2="' + Y(v) + '"/><text class="lbl" x="' + (L - 6) + '" y="' + (Y(v) + 4) + '" text-anchor="end">' + fmt(v) + "</text>";
+  for (var v = Math.ceil(y0 / step) * step; v <= y1; v += step) g += '<line class="grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(v) + '" y2="' + Y(v) + '"/><text class="lbl" x="' + (L - 6) + '" y="' + (Y(v) + 4) + '" text-anchor="end">' + esc(tick(v)) + "</text>";
   for (var w = 1; w <= P.semaines; w++) { var d = mondayOf(w); if (d >= x0 && d <= x1) g += '<text class="lbl" x="' + X(d) + '" y="' + (H - 8) + '" text-anchor="middle">S' + w + "</text>"; }
   (opt.ref || []).forEach(function (r) { if (r.y >= y0 && r.y <= y1) g += '<line class="ref" x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(r.y) + '" y2="' + Y(r.y) + '"/><text class="lbl" x="' + (W - R) + '" y="' + (Y(r.y) - 6) + '" text-anchor="end">' + esc(r.label) + "</text>"; });
   series.forEach(function (s) {
     if (s.line && s.pts.length > 1) g += '<polyline class="' + s.cls + '" points="' + s.pts.map(function (p) { return X(p.x) + "," + Y(p.y); }).join(" ") + '"/>';
-    if (s.dots) s.pts.forEach(function (p, i) { var last = s.line && i === s.pts.length - 1; g += '<circle class="' + s.cls + (s.soft ? " soft" : "") + '" stroke-width="0" cx="' + X(p.x) + '" cy="' + Y(p.y) + '" r="' + (last ? 5 : s.line ? 3 : 2.6) + '"><title>' + esc(fmtShort(p.x) + " : " + fmt(p.y, 1) + " " + opt.unit) + "</title></circle>"; });
+    if (s.dots) s.pts.forEach(function (p, i) { var last = s.line && i === s.pts.length - 1; g += '<circle class="' + s.cls + (s.soft ? " soft" : "") + (p.hollow ? " hollow" : "") + '" stroke-width="0" cx="' + X(p.x) + '" cy="' + Y(p.y) + '" r="' + (last ? 5 : p.hollow ? 4.5 : s.line ? 3 : 2.6) + '"><title>' + esc(fmtShort(p.x) + " : " + (opt.tick ? tick(Math.round(p.y * 10) / 10) : fmt(p.y, 1)) + " " + opt.unit + (p.hollow ? ", séance libre" : "")) + "</title></circle>"; });
   });
   return '<svg class="chart" viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="Évolution en ' + opt.unit + '">' + g + "</svg>";
 }
@@ -691,9 +1001,16 @@ function claudeSheet(where) {
   return h + "</section>";
 }
 function summarize(s) {
-  var def = P.sessions[s.type], parts = [fmtShort(s.date) + " " + (s.plan ? s.plan.short : def ? def.short || def.name : s.type)];
+  var def = P.sessions[s.type], isLib = s.type === LIBRE;
+  var parts = [fmtShort(s.date) + " " + (isLib ? "séance libre hors salle (" + lieuLabel(s.lieu).toLowerCase() + (s.remplace ? ", remplace " + shortName(s.remplace) : "") + ")" : s.plan ? s.plan.short : def ? def.short || def.name : s.type)];
   var r = readiness(s.checkin); if (r) parts.push("forme " + fmt(r.avg, 1) + "/5 (" + CHECK.map(function (q) { return q.k + " " + s.checkin[q.k]; }).join(", ") + ")");
-  keysOf(s.sets).forEach(function (k) { var rows = valuesOf(s.sets[k]).filter(function (x) { return toNum(x.c) !== null || toNum(x.r); }); if (rows.length) parts.push(k + " : " + rows.map(function (x) { return (x.c !== undefined ? x.c : "?") + "×" + (x.r || "?") + "@" + (x.rir !== undefined ? x.rir : "?"); }).join(", ")); });
+  if (isLib) (s.liste || []).forEach(function (it) {
+    var c = CAT[it.k], rows = valuesOf((s.sets && s.sets[it.u]) || {}).filter(function (x) { return x && (toNum(x.c) !== null || toNum(x.r) || toNum(x.t)); });
+    if (!rows.length) return;
+    var nm = libreName(it) + (it.k === "autre" ? " (hors liste)" : c && c.per ? " (kg par haltère)" : c && c.bw ? " (lest)" : "");
+    parts.push(nm + " : " + rows.map(function (x) { return c && c.time ? (toNum(x.c) ? "+" + x.c + " kg " : "") + (x.t || "?") + " s, marge " + (x.m !== undefined ? x.m : "?") + " s" : (x.c !== undefined ? x.c : "?") + "×" + (x.r || "?") + "@" + (x.rir !== undefined ? x.rir : "?"); }).join(", "));
+  });
+  if (!isLib) keysOf(s.sets).forEach(function (k) { var rows = valuesOf(s.sets[k]).filter(function (x) { return toNum(x.c) !== null || toNum(x.r); }); if (rows.length) parts.push(k + " : " + rows.map(function (x) { return (x.c !== undefined ? x.c : "?") + "×" + (x.r || "?") + "@" + (x.rir !== undefined ? x.rir : "?"); }).join(", ")); });
   keysOf(s.mods).forEach(function (k) {
     var m = s.mods[k], rp = s.remp && s.remp[k], t = k + (m.statut === "saute" ? " sauté" : " remplacé" + (rp && rp.nom ? " par " + rp.nom : ""));
     if (m.motif) t += " (" + motifLabel(MOTIFS_EX, m.motif) + (m.zone ? " : " + keysOf(m.zone).map(labelZone).join("/") : "") + (m.precision ? ", " + m.precision : "") + ")";
@@ -714,13 +1031,16 @@ function summarize(s) {
   return "- " + parts.join(" ; ");
 }
 function planText(date) {
-  var w = weekOf(date), types = plannedFor(date) || [];
-  return types.map(function (t) {
+  var w = weekOf(date), types = plannedFor(date) || [], lib = libreOf(date);
+  var out = types.map(function (t) {
     var def = P.sessions[t];
+    if (isReplaced(date, t)) return def.name + " : remplacée aujourd'hui par une séance libre hors salle (" + lieuLabel(lib.lieu).toLowerCase() + ").";
     if (def.kind === "muscu") return def.name + " :\n" + def.ex.map(function (e) { var p = presc(e, w); if (!p) return null; var sg = suggestion(e, p, date); return "  " + e.id + " " + e.name + " : " + p.sets + "×" + p.reps + (p.load ? ", " + p.load : "") + ", RIR " + p.rir + (sg ? " (charge conseillée " + loadLabel(e, sg.load) + ")" : ""); }).filter(Boolean).join("\n");
     if (def.kind === "course") return def.name + " : " + (def.plan[w - 1] || def.plan[def.plan.length - 1]).texte;
     return def.name;
-  }).join("\n") || "Rien de prévu.";
+  });
+  if (lib && !types.some(function (t) { return isReplaced(date, t); })) out.push("Séance libre hors salle en plus (" + lieuLabel(lib.lieu).toLowerCase() + ").");
+  return out.join("\n") || "Rien de prévu.";
 }
 function buildPrompt(kind, question) {
   var date = S.date, w = weekOf(date), from = addDays(date, -21);
@@ -733,7 +1053,7 @@ function buildPrompt(kind, question) {
     : "Réponds à ma question : « " + question + " »";
   return "Tu es mon préparateur physique. Réponds en français, en me tutoyant.\n\nMON PROGRAMME ET SES RÈGLES\n" + (P.contexte || "") +
     "\n\nAUJOURD'HUI : " + fmtLong(date) + ", " + weekLabel(date).toLowerCase() + ".\nSéance prévue :\n" + planText(date) +
-    "\n\nMES SÉANCES DES 21 DERNIERS JOURS (exercice : charge×reps@RIR ; pour les tractions et les dips, la charge est le lest)\n" + hist +
+    "\n\nMES SÉANCES DES 21 DERNIERS JOURS (exercice : charge×reps@RIR ; pour les tractions, les dips et les pompes, la charge est le lest ; en séance libre, exercice au temps : durée et marge en secondes)\n" + hist +
     "\n\nPESÉES : " + pes + "\nMOYENNES PAR SEMAINE : " + (avgs.join(", ") || "aucune") + "\nBILANS DE SEMAINE :\n" + bilans +
     "\n\nMA DEMANDE\n" + ask +
     "\n\nFORMAT : 180 mots maximum, phrases courtes ou puces, chiffres précis. Reste dans la logique du programme sans le réécrire. S'il manque des données, dis lesquelles noter. Une séance arrêtée pour manque de temps ou imprévu, ou un exercice remplacé faute de matériel, ne signale pas une baisse de forme. Pas de diagnostic médical : une douleur qui dure ou augmente se montre à un professionnel de santé. Si tu proposes de modifier le programme, rappelle en une ligne que mon coach valide les changements.";
@@ -838,6 +1158,21 @@ app.addEventListener("click", function (ev) {
     case "modclose": doc = docFor("seances", b.dataset.id); setPath(doc, "mods." + b.dataset.ex, null); setPath(doc, "remp." + b.dataset.ex, null); persist(); render(); break;
     case "arretopen": doc = docFor("seances", b.dataset.id); doc.arret = { ouvert: true }; persist(); render(); break;
     case "arretclose": doc = docFor("seances", b.dataset.id); delete doc.arret; persist(); render(); break;
+    case "librestart": libreDialog(S.date, b.dataset.t); break;
+    case "libreedit": libreDialog(S.date, null); break;
+    case "libreadd": libreMenu(b.dataset.id); break;
+    case "librerm": libreRemove(b.dataset.id, b.dataset.u); break;
+    case "fillvals":
+      doc = docFor("seances", b.dataset.id);
+      b.dataset.v.split(";").forEach(function (kv) { var p = kv.split("="); if (p[1] !== "") setPath(doc, b.dataset.base + p[0], Number(p[1])); });
+      persist(); render(); break;
+    case "courbe":
+      var sel = selectedCurves(), ck = b.dataset.k, ci = sel.indexOf(ck);
+      if (ci >= 0) sel.splice(ci, 1);
+      else if (sel.length >= 4) { toast("4 courbes au plus : retire d'abord une courbe."); break; }
+      else sel.push(ck);
+      D.vue.courbes = sel; persist(); render(); break;
+    case "courbemode": D.vue.mode = b.dataset.v; persist(); render(); break;
     case "ask": ask(b.dataset.q); break;
     case "export": exportData(); break;
     case "copylink": copyText(D.liens[P.id]).then(function (ok) { toast(ok ? "Lien copié." : "Copie impossible sur ce navigateur."); }); break;
@@ -853,11 +1188,12 @@ app.addEventListener("click", function (ev) {
 });
 app.addEventListener("change", function (ev) {
   var el = ev.target;
+  if (el.dataset.act === "add" && el.value === LIBRE) { el.value = ""; libreDialog(S.date, null); return; }
   if (el.dataset.act === "add" && el.value) { var s = seance(S.date, el.value, true); s.ajoutee = true; persist(); render(); return; }
   if (el.dataset.act === "import-file" && el.files && el.files[0]) { importFile(el.files[0]); el.value = ""; return; }
   if (el.dataset.path && /\.nom$/.test(el.dataset.path)) render();
 });
-var NUMERIC = /\.(c|r|rir)$|^kg$|^duree$|^distance$|^distanceTest$|^combats$|^footing$|^sommeil$|^tests\.|^mensu\./;
+var NUMERIC = /\.(c|r|rir|t|m)$|^kg$|^duree$|^distance$|^distanceTest$|^combats$|^footing$|^sommeil$|^tests\.|^mensu\./;
 app.addEventListener("input", function (ev) {
   var el = ev.target; if (!el.dataset || !el.dataset.path) return;
   var doc = docFor(el.dataset.col, el.dataset.id); if (!doc) return;
