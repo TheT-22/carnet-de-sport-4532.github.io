@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.0.2";
+var APP_VERSION = "1.0.3";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -62,7 +62,12 @@ function setPath(o, path, v) {
 
 /* ================= Programme ================= */
 var P = null;
-function setActive() { P = D.actif && D.programmes[D.actif] ? D.programmes[D.actif] : null; }
+function setActive() {
+  P = D.actif && D.programmes[D.actif] ? D.programmes[D.actif] : null;
+  if (P && !P.sessions.MENSU) P.sessions.MENSU = { kind: "mensu", name: "Mensurations", short: "Mensurations" };
+}
+var MESURES = [["epaules", "Tour d'épaules"], ["bras", "Tour de bras relâché"], ["poitrine", "Tour de poitrine"], ["taille", "Tour de taille"]];
+function sessionName(t, date) { return t === "MENSU" && date !== P.debut ? "Mensurations" : P.sessions[t].name; }
 setActive();
 
 function b64uToBytes(s) {
@@ -376,15 +381,15 @@ function weightSheet(date) {
   return '<div class="sheet"><div class="row end"><label class="field grow" for="kg-' + date + '"><span>Pesée du matin, à jeun (kg)</span>' + inp("pesees", date, "kg", p.kg, 'id="kg-' + date + '" inputmode="decimal" class="n" placeholder="ex. 76,2"') + '</label><div class="stat"><b>' + fmt(avg, 2) + '</b><span>moyenne de la semaine</span></div></div></div>';
 }
 function addSheet(date, types) {
-  var opts = keysOf(P.sessions).filter(function (t) { return types.indexOf(t) < 0 && t !== "MENSU"; });
+  var opts = keysOf(P.sessions).filter(function (t) { return types.indexOf(t) < 0; });
   return '<label class="field" for="add-s"><span>Séance faite un autre jour, rattrapage ou séance en plus</span><select id="add-s" data-act="add"><option value="">Ajouter une séance à ce jour</option>' +
-    opts.map(function (t) { return '<option value="' + t + '">' + esc(P.sessions[t].name) + "</option>"; }).join("") + "</select></label>";
+    opts.map(function (t) { return '<option value="' + t + '">' + esc(sessionName(t, date)) + "</option>"; }).join("") + "</select></label>";
 }
 function sessionSheet(date, type, w) {
   var def = P.sessions[type], s = seance(date, type) || {}, id = seanceId(date, type), st;
   if (s.arret && s.arret.motif) st = '<span class="state warn">Terminée plus tôt</span>';
   else st = hasData(s) ? '<span class="state done">Notée</span>' : '<span class="state">À faire</span>';
-  var h = '<section class="sheet"><div class="sheet-head"><h2>' + esc(def.name) + "</h2>" + (def.kind === "repos" ? "" : st) + "</div>";
+  var h = '<section class="sheet"><div class="sheet-head"><h2>' + esc(sessionName(type, date)) + "</h2>" + (def.kind === "repos" ? "" : st) + "</div>";
   if (def.kind === "muscu") h += bodyMuscu(date, def, w, s, id);
   else if (def.kind === "course") h += bodyCourse(date, def, w, s, id);
   else if (def.kind === "sport") h += bodySport(def, s, id);
@@ -520,8 +525,8 @@ function bodyTests(def, s, id) {
 function bodyMensu(s, id) {
   var m = s.mensu || {};
   return '<p class="small muted">Le matin, à jeun. Photos de face, de profil et de dos, avec la même lumière à chaque fois.</p><div class="row end">' +
-    [["epaules", "Tour d'épaules (cm)"], ["bras", "Tour de bras relâché (cm)"], ["poitrine", "Tour de poitrine (cm)"], ["taille", "Tour de taille (cm)"]].map(function (f) {
-      return '<label class="field grow"><span>' + f[1] + "</span>" + inp("seances", id, "mensu." + f[0], m[f[0]], 'inputmode="decimal"') + "</label>";
+    MESURES.map(function (f) {
+      return '<label class="field grow"><span>' + esc(f[1]) + " (cm)</span>" + inp("seances", id, "mensu." + f[0], m[f[0]], 'inputmode="decimal"') + "</label>";
     }).join("") + "</div>";
 }
 
@@ -567,8 +572,29 @@ function viewProgres() {
     '<div class="legend">' + series.map(function (s) { return '<span><i class="' + s.key + '"></i>' + esc(s.e.name) + (s.pts.length ? " : " + fmt(s.pts[s.pts.length - 1].y) + " kg" : "") + "</span>"; }).join("") + "</div>" : '<p class="small muted">La courbe apparaît après ta première séance notée.</p>') +
     '<p class="tiny muted">Calcul : charge × (1 + (reps + RIR) ÷ 30), meilleure série de chaque séance. Pour les tractions et les dips, le poids de corps est compris.</p></section>';
   var list = valuesOf(D.seances).filter(hasData).sort(function (a, b) { return a.date < b.date ? 1 : -1; }).slice(0, 40);
+  h += mensuSheet();
   h += '<section class="sheet"><h2>Séances notées</h2><div class="log">' + (list.length ? list.map(logItem).join("") : '<p class="small muted">Aucune séance notée pour l\'instant.</p>') + "</div></section>";
   return h;
+}
+function mensuSeries(k) {
+  var byDate = {};
+  valuesOf(D.seances).forEach(function (s) { var v = s.mensu ? toNum(s.mensu[k]) : null; if (v) byDate[s.date] = v; });
+  return keysOf(byDate).sort().map(function (d) { return { x: d, y: byDate[d] }; });
+}
+function mensuSheet() {
+  var k = D.mesureChoisie || "bras", label = "";
+  MESURES.forEach(function (m) { if (m[0] === k) label = m[1]; });
+  var pts = mensuSeries(k), h = '<section class="sheet"><h2>Mensurations</h2>';
+  h += '<label class="field" for="mesure-sel"><span>Mesure affichée</span><select id="mesure-sel" data-act="mesure">' +
+    MESURES.map(function (m) { var n = mensuSeries(m[0]).length; return '<option value="' + m[0] + '"' + (m[0] === k ? " selected" : "") + ">" + esc(m[1]) + (n ? " (" + n + " mesure" + (n > 1 ? "s" : "") + ")" : "") + "</option>"; }).join("") + "</select></label>";
+  if (!pts.length) h += '<p class="small muted">Aucune mesure pour l\'instant. Note tes mensurations le jour du départ, puis toutes les 2 à 4 semaines avec « Ajouter une séance » puis « Mensurations » dans Aujourd\'hui.</p>';
+  else {
+    h += chart([{ pts: pts, cls: "s-plate", dots: true, line: true }], { unit: "cm" });
+    var first = pts[0], last = pts[pts.length - 1], diff = last.y - first.y;
+    h += '<p class="small">' + esc(label) + " : <b class=\"num\">" + fmt(last.y, 1) + " cm</b> le " + esc(fmtShort(last.x)).replace(/\.$/, "") +
+      (pts.length > 1 ? ", soit " + (diff >= 0 ? "+" : "") + fmt(diff, 1) + " cm depuis le " + esc(fmtShort(first.x)).replace(/\.$/, "") + "." : ". Une deuxième mesure fera apparaître l\'évolution.") + "</p>";
+  }
+  return h + '<p class="tiny muted">Mesure toujours le matin à jeun, avant l\'entraînement, au même endroit et de la même façon.</p></section>';
 }
 function logItem(s) {
   var def = P.sessions[s.type], r = readiness(s.checkin), b = s.bilan || {}, chips = [];
@@ -804,6 +830,7 @@ app.addEventListener("change", function (ev) {
   var el = ev.target;
   if (el.dataset.act === "add" && el.value) { var s = seance(S.date, el.value, true); s.ajoutee = true; persist(); render(); return; }
   if (el.dataset.act === "import-file" && el.files && el.files[0]) { importFile(el.files[0]); el.value = ""; return; }
+  if (el.dataset.act === "mesure") { D.mesureChoisie = el.value; persist(); render(); return; }
   if (el.dataset.path && /\.nom$/.test(el.dataset.path)) render();
 });
 var NUMERIC = /\.(c|r|rir)$|^kg$|^duree$|^distance$|^distanceTest$|^combats$|^footing$|^sommeil$|^tests\.|^mensu\./;
