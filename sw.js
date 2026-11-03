@@ -1,11 +1,11 @@
 /* Service worker : met l'application en cache pour l'utiliser sans réseau.
    Il ne met en cache que les fichiers de l'application, jamais les données de l'utilisateur. */
-var CACHE = "carnet-muscu-1.0.3";
+var CACHE = "carnet-muscu-1.0.4";
 var FILES = ["./", "index.html", "styles.css", "app.js", "manifest.webmanifest",
   "fonts/archivo-latin-wdth-normal.woff2", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png", "icons/icon-maskable-512.png"];
 
 self.addEventListener("install", function (e) {
-  e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(FILES); }));
+  e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(FILES.map(function (f) { return new Request(f, { cache: "reload" }); })); }));
 });
 self.addEventListener("activate", function (e) {
   e.waitUntil(caches.keys().then(function (keys) {

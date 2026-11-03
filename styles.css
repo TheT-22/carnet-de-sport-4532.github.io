@@ -23,6 +23,7 @@
   --ok: #2b7a4b; --ok-soft: #e3f2e8;
   --caution: #a86200; --caution-soft: #fbf0dc;
   --stop: #bf3a2f; --stop-soft: #fbe7e4;
+  --c4: #8a55c9;         /* 4e série de courbes */
   --font: "Archivo", "Helvetica Neue", Arial, system-ui, sans-serif;
   --r-sheet: 16px;
   --r-ctl: 10px;
@@ -32,14 +33,14 @@
   :root:not([data-theme="light"]) {
     --chalk: #121417; --surface: #1a1d21; --ink: #e9ebee; --steel: #9ba3ad; --rule: #2a2e34;
     --plate: #739cff; --plate-soft: #1c2742;
-    --ok: #5cc287; --ok-soft: #14281c; --caution: #e3a54a; --caution-soft: #2d2313; --stop: #f07a6e; --stop-soft: #331a17;
+    --ok: #5cc287; --ok-soft: #14281c; --caution: #e3a54a; --caution-soft: #2d2313; --stop: #f07a6e; --stop-soft: #331a17; --c4: #b997f0;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --chalk: #121417; --surface: #1a1d21; --ink: #e9ebee; --steel: #9ba3ad; --rule: #2a2e34;
   --plate: #739cff; --plate-soft: #1c2742;
-  --ok: #5cc287; --ok-soft: #14281c; --caution: #e3a54a; --caution-soft: #2d2313; --stop: #f07a6e; --stop-soft: #331a17;
+  --ok: #5cc287; --ok-soft: #14281c; --caution: #e3a54a; --caution-soft: #2d2313; --stop: #f07a6e; --stop-soft: #331a17; --c4: #b997f0;
   color-scheme: dark;
 }
 
@@ -223,6 +224,7 @@ textarea { min-height: 84px; resize: vertical; line-height: 1.45; }
 .chart .s-plate { stroke: var(--plate); fill: var(--plate); }
 .chart .s-ink { stroke: var(--ink); fill: var(--ink); }
 .chart .s-steel { stroke: var(--steel); fill: var(--steel); }
+.chart .s-c4 { stroke: var(--c4); fill: var(--c4); }
 .chart polyline { fill: none; stroke-width: 2.5; stroke-linejoin: round; }
 .chart .soft { opacity: .45; }
 .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--steel); }
@@ -230,6 +232,7 @@ textarea { min-height: 84px; resize: vertical; line-height: 1.45; }
 .legend .k-plate { background: var(--plate); }
 .legend .k-ink { background: var(--ink); }
 .legend .k-steel { background: var(--steel); }
+.legend .k-c4 { background: var(--c4); }
 .log { display: grid; }
 .log-item { display: grid; gap: 4px; padding: 12px 0; border-bottom: 1px solid var(--rule); }
 .log-item:last-child { border-bottom: 0; }

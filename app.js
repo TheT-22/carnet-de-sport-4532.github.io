@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.0.3";
+var APP_VERSION = "1.0.4";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -582,19 +582,22 @@ function mensuSeries(k) {
   return keysOf(byDate).sort().map(function (d) { return { x: d, y: byDate[d] }; });
 }
 function mensuSheet() {
-  var k = D.mesureChoisie || "bras", label = "";
-  MESURES.forEach(function (m) { if (m[0] === k) label = m[1]; });
-  var pts = mensuSeries(k), h = '<section class="sheet"><h2>Mensurations</h2>';
-  h += '<label class="field" for="mesure-sel"><span>Mesure affichée</span><select id="mesure-sel" data-act="mesure">' +
-    MESURES.map(function (m) { var n = mensuSeries(m[0]).length; return '<option value="' + m[0] + '"' + (m[0] === k ? " selected" : "") + ">" + esc(m[1]) + (n ? " (" + n + " mesure" + (n > 1 ? "s" : "") + ")" : "") + "</option>"; }).join("") + "</select></label>";
-  if (!pts.length) h += '<p class="small muted">Aucune mesure pour l\'instant. Note tes mensurations le jour du départ, puis toutes les 2 à 4 semaines avec « Ajouter une séance » puis « Mensurations » dans Aujourd\'hui.</p>';
-  else {
-    h += chart([{ pts: pts, cls: "s-plate", dots: true, line: true }], { unit: "cm" });
-    var first = pts[0], last = pts[pts.length - 1], diff = last.y - first.y;
-    h += '<p class="small">' + esc(label) + " : <b class=\"num\">" + fmt(last.y, 1) + " cm</b> le " + esc(fmtShort(last.x)).replace(/\.$/, "") +
-      (pts.length > 1 ? ", soit " + (diff >= 0 ? "+" : "") + fmt(diff, 1) + " cm depuis le " + esc(fmtShort(first.x)).replace(/\.$/, "") + "." : ". Une deuxième mesure fera apparaître l\'évolution.") + "</p>";
-  }
-  return h + '<p class="tiny muted">Mesure toujours le matin à jeun, avant l\'entraînement, au même endroit et de la même façon.</p></section>';
+  var classes = ["s-plate", "s-ink", "s-steel", "s-c4"], keys = ["k-plate", "k-ink", "k-steel", "k-c4"];
+  var series = MESURES.map(function (m, i) {
+    var pts = mensuSeries(m[0]), base = pts.length ? pts[0].y : 0;
+    return { label: m[1], cls: classes[i], key: keys[i], raw: pts, pts: pts.map(function (p) { return { x: p.x, y: p.y - base }; }) };
+  });
+  var any = series.some(function (s) { return s.pts.length; });
+  var h = '<section class="sheet"><h2>Mensurations</h2>';
+  if (!any) return h + '<p class="small muted">Aucune mesure pour l\'instant. Note tes mensurations le jour du départ, puis toutes les 2 à 4 semaines : dans Aujourd\'hui, « Ajouter une séance » puis « Mensurations ».</p></section>';
+  h += '<p class="small muted">Écart en centimètres depuis ta première mesure, pour comparer les quatre tours sur la même échelle.</p>';
+  h += chart(series.map(function (s) { return { pts: s.pts, cls: s.cls, dots: true, line: true }; }), { unit: "cm", ref: [{ y: 0, label: "première mesure" }] });
+  h += '<div class="legend">' + series.map(function (s) {
+    if (!s.raw.length) return '<span><i class="' + s.key + '"></i>' + esc(s.label) + " : pas encore mesuré</span>";
+    var last = s.raw[s.raw.length - 1], d = s.pts[s.pts.length - 1].y;
+    return '<span><i class="' + s.key + '"></i>' + esc(s.label) + " : " + fmt(last.y, 1) + " cm" + (s.raw.length > 1 ? " (" + (d >= 0 ? "+" : "") + fmt(d, 1) + ")" : "") + "</span>";
+  }).join("") + "</div>";
+  return h + '<p class="tiny muted">Mesure toujours le matin à jeun, avant l\'entraînement, au même endroit et de la même façon. Une courbe apparaît dès la deuxième mesure.</p></section>';
 }
 function logItem(s) {
   var def = P.sessions[s.type], r = readiness(s.checkin), b = s.bilan || {}, chips = [];
@@ -830,7 +833,6 @@ app.addEventListener("change", function (ev) {
   var el = ev.target;
   if (el.dataset.act === "add" && el.value) { var s = seance(S.date, el.value, true); s.ajoutee = true; persist(); render(); return; }
   if (el.dataset.act === "import-file" && el.files && el.files[0]) { importFile(el.files[0]); el.value = ""; return; }
-  if (el.dataset.act === "mesure") { D.mesureChoisie = el.value; persist(); render(); return; }
   if (el.dataset.path && /\.nom$/.test(el.dataset.path)) render();
 });
 var NUMERIC = /\.(c|r|rir)$|^kg$|^duree$|^distance$|^distanceTest$|^combats$|^footing$|^sommeil$|^tests\.|^mensu\./;
