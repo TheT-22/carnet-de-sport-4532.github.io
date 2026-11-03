@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.0.0";
+var APP_VERSION = "1.0.1";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -520,7 +520,7 @@ function bodyTests(def, s, id) {
 function bodyMensu(s, id) {
   var m = s.mensu || {};
   return '<p class="small muted">Le matin, à jeun. Photos de face, de profil et de dos, avec la même lumière à chaque fois.</p><div class="row end">' +
-    [["bras", "Tour de bras contracté (cm)"], ["poitrine", "Tour de poitrine (cm)"], ["taille", "Tour de taille (cm)"]].map(function (f) {
+    [["epaules", "Tour d'épaules (cm)"], ["bras", "Tour de bras contracté (cm)"], ["poitrine", "Tour de poitrine (cm)"], ["taille", "Tour de taille (cm)"]].map(function (f) {
       return '<label class="field grow"><span>' + f[1] + "</span>" + inp("seances", id, "mensu." + f[0], m[f[0]], 'inputmode="decimal"') + "</label>";
     }).join("") + "</div>";
 }
