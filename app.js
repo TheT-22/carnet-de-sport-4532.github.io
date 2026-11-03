@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.0.4";
+var APP_VERSION = "1.0.5";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -98,7 +98,28 @@ function validateProgram(p) {
   if (!ok) throw new Error("Ce programme n'est pas lisible par cette version de l'application.");
   return p;
 }
+/* Une séance déjà notée garde ses exercices et ses consignes d'origine,
+   même si le programme est modifié ou remplacé ensuite. */
+function freezeSession(s, prog) {
+  if (!s || s.plan || !prog || s.programme !== prog.id || !hasData(s)) return false;
+  var def = prog.sessions[s.type]; if (!def || def.kind !== "muscu") return false;
+  var w = s.semaine || (Math.floor(diffDays(s.date, prog.debut) / 7) + 1);
+  s.plan = { name: def.name, short: def.short || def.name, ex: def.ex.map(function (e) {
+    var p = presc(e, w); if (!p) return null;
+    return { id: e.id, name: e.name, bw: !!e.bw, step: e.step || 2.5, rest: e.rest, ss: e.ss || "", note: e.note || "", alt: e.alt || [], p: p };
+  }).filter(Boolean) };
+  return true;
+}
+function freezeAll(onlyPast) {
+  var changed = false, today = todayStr();
+  valuesOf(D.seances).forEach(function (s) {
+    if (onlyPast && s.date >= today) return;
+    if (freezeSession(s, D.programmes[s.programme])) changed = true;
+  });
+  return changed;
+}
 function installProgram(p, link) {
+  freezeAll(false);
   D.programmes[p.id] = p; D.actif = p.id; if (link) D.liens[p.id] = link;
   persistNow(); setActive(); S.date = initialDate(); S.week = clampWeek(weekOf(S.date)); S.view = "jour"; render();
   toast("Programme installé : " + (p.titre || "nouveau bloc"));
@@ -389,7 +410,7 @@ function sessionSheet(date, type, w) {
   var def = P.sessions[type], s = seance(date, type) || {}, id = seanceId(date, type), st;
   if (s.arret && s.arret.motif) st = '<span class="state warn">Terminée plus tôt</span>';
   else st = hasData(s) ? '<span class="state done">Notée</span>' : '<span class="state">À faire</span>';
-  var h = '<section class="sheet"><div class="sheet-head"><h2>' + esc(sessionName(type, date)) + "</h2>" + (def.kind === "repos" ? "" : st) + "</div>";
+  var h = '<section class="sheet"><div class="sheet-head"><h2>' + esc(s.plan ? s.plan.name : sessionName(type, date)) + "</h2>" + (def.kind === "repos" ? "" : st) + "</div>";
   if (def.kind === "muscu") h += bodyMuscu(date, def, w, s, id);
   else if (def.kind === "course") h += bodyCourse(date, def, w, s, id);
   else if (def.kind === "sport") h += bodySport(def, s, id);
@@ -424,8 +445,9 @@ function bodyMuscu(date, def, w, s, id) {
   h += checkin(s, id);
   var r = readiness(s.checkin), light = r && r.level === "stop";
   h += '<div class="hr"></div><div class="section"><h3>Exercices</h3><p class="small muted">Note pour chaque série la charge, les répétitions faites et ton RIR ressenti (répétitions que tu aurais encore pu faire). « = prévu » remplit la série avec la cible.</p></div>';
-  def.ex.forEach(function (e) {
-    var p = presc(e, w); if (!p) return;
+  var items = s.plan ? s.plan.ex.map(function (x) { return { e: x, p: x.p }; }) : def.ex.map(function (e) { return { e: e, p: presc(e, w) }; });
+  items.forEach(function (it) {
+    var e = it.e, p = it.p; if (!p) return;
     var sg = suggestion(e, p, date), planned = Math.max(1, p.sets - (light ? 1 : 0));
     var rows = (s.sets && s.sets[e.id]) || {}, has = rowsOk(rows).length > 0, n = Math.max(planned, keysOf(rows).length);
     var rirT = light ? p.rirN + 1 : p.rirN, mod = (s.mods || {})[e.id];
@@ -607,7 +629,7 @@ function logItem(s) {
   if (s.arret && s.arret.motif) chips.push('<span class="state warn">arrêtée, ' + esc(motifLabel(MOTIFS_ARRET, s.arret.motif)) + "</span>");
   if (s.mods && keysOf(s.mods).length) chips.push('<span class="state alt">' + keysOf(s.mods).length + " exercice" + (keysOf(s.mods).length > 1 ? "s" : "") + " changé" + (keysOf(s.mods).length > 1 ? "s" : "") + "</span>");
   var pains = b.douleurs ? keysOf(b.douleurs).filter(function (k) { return b.douleurs[k]; }) : [];
-  return '<button type="button" class="log-item linkless" data-act="goto" data-date="' + s.date + '"><div class="row"><b>' + esc(fmtShort(s.date)) + ", " + esc(def ? def.short || def.name : s.type) + '</b><span class="row">' + chips.join("") + "</span></div>" +
+  return '<button type="button" class="log-item linkless" data-act="goto" data-date="' + s.date + '"><div class="row"><b>' + esc(fmtShort(s.date)) + ", " + esc(s.plan ? s.plan.short : def ? def.short || def.name : s.type) + '</b><span class="row">' + chips.join("") + "</span></div>" +
     (pains.length ? '<span class="pain">Douleurs : ' + esc(pains.map(function (k) { return labelZone(k); }).join(", ")) + "</span>" : "") + (b.note ? '<span class="small muted">' + esc(b.note) + "</span>" : "") + "</button>";
 }
 function labelZone(k) { for (var i = 0; i < DOULEURS.length; i++) if (zk(DOULEURS[i]) === k) return DOULEURS[i].toLowerCase(); return k; }
@@ -669,7 +691,7 @@ function claudeSheet(where) {
   return h + "</section>";
 }
 function summarize(s) {
-  var def = P.sessions[s.type], parts = [fmtShort(s.date) + " " + (def ? def.short || def.name : s.type)];
+  var def = P.sessions[s.type], parts = [fmtShort(s.date) + " " + (s.plan ? s.plan.short : def ? def.short || def.name : s.type)];
   var r = readiness(s.checkin); if (r) parts.push("forme " + fmt(r.avg, 1) + "/5 (" + CHECK.map(function (q) { return q.k + " " + s.checkin[q.k]; }).join(", ") + ")");
   keysOf(s.sets).forEach(function (k) { var rows = valuesOf(s.sets[k]).filter(function (x) { return toNum(x.c) !== null || toNum(x.r); }); if (rows.length) parts.push(k + " : " + rows.map(function (x) { return (x.c !== undefined ? x.c : "?") + "×" + (x.r || "?") + "@" + (x.rir !== undefined ? x.rir : "?"); }).join(", ")); });
   keysOf(s.mods).forEach(function (k) {
@@ -861,6 +883,7 @@ if ("serviceWorker" in navigator && (location.protocol === "https:" || location.
 }
 
 /* ================= Démarrage ================= */
+if (freezeAll(true)) persistNow();
 render();
 var startCode = extractCode(location.hash);
 if (startCode) {
