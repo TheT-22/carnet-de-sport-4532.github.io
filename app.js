@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.1.0";
+var APP_VERSION = "1.2.0";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -76,39 +76,46 @@ setActive();
    de progrès quand le programme lui donne le même code (champ « cat »). */
 var CATALOGUE = [
   { g: "Poussée · pectoraux, épaules", ex: [
-    { k: "dc-barre", n: "Développé couché, barre" },
-    { k: "dc-halt", n: "Développé couché, haltères", per: true },
-    { k: "dm-barre", n: "Développé militaire, barre" },
-    { k: "dm-halt", n: "Développé militaire, haltères", per: true },
-    { k: "dips", n: "Dips", bw: true },
-    { k: "pompes", n: "Pompes", bw: true, bwf: 0.65 },
-    { k: "di-halt", n: "Développé incliné, haltères", per: true },
-    { k: "el-lat", n: "Élévations latérales, haltères", per: true }] },
+    { k: "dc-barre", n: "Développé couché, barre", gr: "push", mu: { pecs: 1, triceps: 0.5, epaules: 0.5 } },
+    { k: "dc-halt", n: "Développé couché, haltères", per: true, gr: "push", mu: { pecs: 1, triceps: 0.5, epaules: 0.5 } },
+    { k: "dm-barre", n: "Développé militaire, barre", gr: "push", mu: { epaules: 1, triceps: 0.5 } },
+    { k: "dm-halt", n: "Développé militaire, haltères", per: true, gr: "push", mu: { epaules: 1, triceps: 0.5 } },
+    { k: "dips", n: "Dips", bw: true, gr: "push", mu: { pecs: 1, triceps: 0.5, epaules: 0.5 } },
+    { k: "pompes", n: "Pompes", bw: true, bwf: 0.65, gr: "push", mu: { pecs: 1, triceps: 0.5, epaules: 0.5 } },
+    { k: "di-halt", n: "Développé incliné, haltères", per: true, gr: "push", mu: { pecs: 1, triceps: 0.5, epaules: 0.5 } },
+    { k: "el-lat", n: "Élévations latérales, haltères", per: true, gr: "push", mu: { epaules: 1 } }] },
   { g: "Tirage · dos", ex: [
-    { k: "tractions", n: "Tractions", bw: true },
-    { k: "row-barre", n: "Rowing, barre" },
-    { k: "row-1b", n: "Rowing un bras, haltère" }] },
+    { k: "tractions", n: "Tractions", bw: true, gr: "pull", mu: { dorsal: 1, biceps: 0.5 } },
+    { k: "row-barre", n: "Rowing, barre", gr: "pull", mu: { dorsal: 1, trapezes: 0.5, biceps: 0.5 } },
+    { k: "row-1b", n: "Rowing un bras, haltère", gr: "pull", mu: { dorsal: 1, biceps: 0.5 } }] },
   { g: "Bras", ex: [
-    { k: "curl-barre", n: "Curl biceps, barre" },
-    { k: "curl-halt", n: "Curl biceps, haltères", per: true },
-    { k: "ext-poulie", n: "Extension triceps, poulie" },
-    { k: "ext-halt", n: "Extension triceps, haltère" }] },
+    { k: "curl-barre", n: "Curl biceps, barre", gr: "pull", mu: { biceps: 1 } },
+    { k: "curl-halt", n: "Curl biceps, haltères", per: true, gr: "pull", mu: { biceps: 1 } },
+    { k: "ext-poulie", n: "Extension triceps, poulie", gr: "push", mu: { triceps: 1 } },
+    { k: "ext-halt", n: "Extension triceps, haltère", gr: "push", mu: { triceps: 1 } }] },
   { g: "Jambes", ex: [
-    { k: "squat", n: "Squat, barre" },
-    { k: "fente-bulg", n: "Fente bulgare", per: true },
-    { k: "sdtr-barre", n: "Soulevé de terre roumain, barre" },
-    { k: "sdtr-halt", n: "Soulevé de terre roumain, haltères", per: true },
-    { k: "sdt", n: "Soulevé de terre" },
-    { k: "hip-thrust", n: "Hip thrust" },
-    { k: "mollets", n: "Mollets" },
-    { k: "kb-swing", n: "Kettlebell swing" }] },
+    { k: "squat", n: "Squat, barre", gr: "jambes", mu: { quadri: 1 } },
+    { k: "fente-bulg", n: "Fente bulgare", per: true, gr: "jambes", mu: { quadri: 1 } },
+    { k: "sdtr-barre", n: "Soulevé de terre roumain, barre", gr: "jambes", mu: { ischios: 1 } },
+    { k: "sdtr-halt", n: "Soulevé de terre roumain, haltères", per: true, gr: "jambes", mu: { ischios: 1 } },
+    { k: "sdt", n: "Soulevé de terre", gr: "jambes", mu: { ischios: 1, quadri: 0.5, trapezes: 0.5 } },
+    { k: "hip-thrust", n: "Hip thrust", gr: "jambes", mu: { ischios: 0.5 } },
+    { k: "mollets", n: "Mollets", gr: "jambes", mu: { mollets: 1 } },
+    { k: "kb-swing", n: "Kettlebell swing", gr: "jambes", mu: { ischios: 1 } }] },
   { g: "Cou", ex: [
     { k: "cou", n: "Cou, flexion et extension" }] },
   { g: "Au temps · durée au lieu des reps", ex: [
-    { k: "gainage", n: "Gainage, planche", time: true },
-    { k: "gainage-lat", n: "Gainage latéral", time: true },
+    { k: "gainage", n: "Gainage, planche", time: true, gr: "tronc", mu: { abdos: 1 } },
+    { k: "gainage-lat", n: "Gainage latéral", time: true, gr: "tronc", mu: { abdos: 1 } },
     { k: "suspension", n: "Suspension à la barre", time: true }] }
 ];
+/* Volume : séries de travail fractionnées (1 pour le muscle travaillé directement, 0,5 pour un muscle
+   qui aide ; Pelland et al., Sports Medicine 2026). Vue par groupe : chaque série compte une fois,
+   dans le groupe de son mouvement. */
+var MUSCLES = [["biceps", "Biceps"], ["triceps", "Triceps"], ["epaules", "Épaules"], ["pecs", "Pectoraux"], ["dorsal", "Grand dorsal"], ["trapezes", "Trapèzes"], ["abdos", "Abdominaux"], ["quadri", "Quadriceps"], ["ischios", "Ischio-jambiers"], ["mollets", "Mollets"]];
+var GROUPES = [["push", "Poussée", "pectoraux, épaules, triceps"], ["pull", "Tirage", "grand dorsal, trapèzes, biceps"], ["jambes", "Jambes", "quadriceps, ischio-jambiers, mollets"], ["tronc", "Tronc", "abdominaux"]];
+var MUSCLE_GROUPE = { biceps: "pull", triceps: "push", epaules: "push", pecs: "push", dorsal: "pull", trapezes: "pull", abdos: "tronc", quadri: "jambes", ischios: "jambes", mollets: "jambes" };
+var RIR_MAX_SERIE = 4;
 var CAT = {}, CAT_ORDER = {};
 CATALOGUE.forEach(function (g) { g.ex.forEach(function (c) { CAT_ORDER[c.k] = keysOf(CAT).length; CAT[c.k] = c; }); });
 var LIBRE = "LIBRE";
@@ -151,7 +158,7 @@ function freezeSession(s, prog) {
   var w = s.semaine || (Math.floor(diffDays(s.date, prog.debut) / 7) + 1);
   s.plan = { name: def.name, short: def.short || def.name, ex: def.ex.map(function (e) {
     var p = presc(e, w); if (!p) return null;
-    return { id: e.id, name: e.name, bw: !!e.bw, cat: e.cat || "", step: e.step || 2.5, rest: e.rest, ss: e.ss || "", note: e.note || "", alt: e.alt || [], p: p };
+    return { id: e.id, name: e.name, bw: !!e.bw, cat: e.cat || "", mu: e.mu || null, gr: e.gr || "", step: e.step || 2.5, rest: e.rest, ss: e.ss || "", note: e.note || "", alt: e.alt || [], p: p };
   }).filter(Boolean) };
   return true;
 }
@@ -338,6 +345,8 @@ function render() {
   else h = viewReglages();
   if (S.updateReady) h = '<div class="note info row"><span class="grow">Une nouvelle version de l\'application est prête.</span><button type="button" class="btn small primary" data-act="update">Mettre à jour</button></div>' + h;
   app.innerHTML = h;
+  Array.prototype.forEach.call(app.querySelectorAll("[data-w]"), function (el) { el.style.width = Math.min(100, Number(el.dataset.w)) + "%"; });
+  Array.prototype.forEach.call(app.querySelectorAll("[data-l]"), function (el) { el.style.left = Math.min(100, Number(el.dataset.l)) + "%"; });
   window.scrollTo(0, y);
 }
 function renderMasthead() {
@@ -580,7 +589,9 @@ function progEx(s, id) {
   var pe = def && def.ex ? def.ex.filter(function (e) { return e.id === id; })[0] : null;
   var fe = s.plan ? s.plan.ex.filter(function (e) { return e.id === id; })[0] : null;
   var e = fe || pe; if (!e) return null;
-  return { id: id, name: e.name, bw: !!e.bw, cat: (fe && fe.cat) || (pe && pe.cat) || "" };
+  var cat = (fe && fe.cat) || (pe && pe.cat) || "", c = CAT[cat];
+  return { id: id, name: e.name, bw: !!e.bw, cat: cat,
+    mu: (fe && fe.mu) || (pe && pe.mu) || (c && c.mu) || null, gr: (fe && fe.gr) || (pe && pe.gr) || (c && c.gr) || "" };
 }
 function catRows(s, k) {
   var out = [];
@@ -610,6 +621,12 @@ function perfText(c, r) {
   var load = c && c.bw ? (toNum(r.c) > 0 ? "+" + fmt(toNum(r.c)) + " kg" : "poids de corps") : fmt(toNum(r.c)) + " kg";
   return load + " × " + fmt(toNum(r.r), 0) + (toNum(r.rir) !== null ? ", RIR " + fmt(toNum(r.rir)) : "");
 }
+function muscleName(k) { for (var i = 0; i < MUSCLES.length; i++) if (MUSCLES[i][0] === k) return MUSCLES[i][1]; return k; }
+function volText(w) {
+  if (w < 1 || w > P.semaines) return "hors bloc";
+  var mon = mondayOf(w), sun = addDays(mon, 6), d = doneVol(mon, sun), p = plannedVol(mon, sun);
+  return MUSCLES.map(function (m) { return m[1].toLowerCase() + " " + fmt(d.m[m[0]]) + "/" + fmt(p.m[m[0]]); }).join(", ");
+}
 function libreName(it) { var c = CAT[it.k]; return c ? c.n : it.k === "autre" ? (it.nom || "Autre exercice") : "Exercice"; }
 function libreSheet(date) {
   var s = libreOf(date), id = seanceId(date, LIBRE), liste = s.liste || [], st;
@@ -629,7 +646,9 @@ function libreSheet(date) {
 function libreEx(s, id, it, i, date) {
   var c = CAT[it.k] || null, time = !!(c && c.time), rows = (s.sets && s.sets[it.u]) || {}, n = Math.max(time ? 2 : 3, keysOf(rows).length), name = libreName(it);
   var h = '<div class="ex" id="ex-' + esc(it.u) + '"><div class="ex-title"><h3><span class="ex-code">' + (i + 1) + "</span>" + esc(name) + '</h3><button type="button" class="icon-btn" data-act="librerm" data-id="' + esc(id) + '" data-u="' + esc(it.u) + '" aria-label="Retirer ' + esc(name) + ' de la séance">' + ICON_X + "</button></div>";
-  if (it.k === "autre") h += '<label class="field"><span>Nom de l\'exercice</span>' + inp("seances", id, "liste." + i + ".nom", it.nom, 'placeholder="ex. Rotation externe à l\'élastique"') + '</label><p class="small muted">Noté dans le journal et le résumé pour Claude, mais pas dans les courbes de Progrès.</p>';
+  if (it.k === "autre") h += '<label class="field"><span>Nom de l\'exercice</span>' + inp("seances", id, "liste." + i + ".nom", it.nom, 'placeholder="ex. Rotation externe à l\'élastique"') + "</label>" +
+    '<div class="scale"><div class="scale-q"><span>Muscle travaillé</span></div>' + seg("seances", id, "liste." + i + ".mu", MUSCLES.map(function (m) { return { v: m[0], l: m[1] }; }), it.mu) + "</div>" +
+    '<p class="small muted">Noté dans le journal et le résumé pour Claude, et compté dans le volume du muscle choisi. Pas de courbe de force pour cet exercice.</p>';
   var last = it.k === "autre" ? (it.nom ? lastAutre(it.nom, date) : null) : c ? lastCat(it.k, date) : null;
   h += '<p class="advice">' + (last ? "Dernière fois : " + esc(perfText(c, last.best)) + ' <span class="muted">(' + esc(fmtShort(last.date)) + (last.salle ? ", à la salle" : "") + ")</span>"
     : time ? "Première fois : note la durée tenue et la marge qu'il te restait." : "Première fois sur cet exercice : choisis une charge qui laisse 2 répétitions en réserve.") + "</p>";
@@ -719,7 +738,7 @@ function libreMenu(id) {
     });
     h += "</div>";
   });
-  h += '<div class="menu-group"><h3>Pas dans la liste</h3><button type="button" class="pick" data-sh="pick" data-k="autre"><span>Autre exercice…</span><span class="meta">non suivi dans Progrès</span></button></div>';
+  h += '<div class="menu-group"><h3>Pas dans la liste</h3><button type="button" class="pick" data-sh="pick" data-k="autre"><span>Autre exercice…</span><span class="meta">pas de courbe de force</span></button></div>';
   h += '<div><button type="button" class="btn wide" data-sh="cancel">Fermer</button></div>';
   openSheet(h, function (b, close) {
     close();
@@ -807,6 +826,7 @@ function viewSemaine() {
     h += '<button type="button" class="wrow' + (d === todayStr() ? " today" : "") + '" data-act="goto" data-date="' + d + '"><span class="d">' + esc(fmtDayName(d)) + " " + parse(d).getDate() + "</span><span>" + esc(label) + '</span><span class="tick' + (done ? " done" : "") + '" aria-label="' + (done ? "fait" : "à faire") + '"></span></button>';
   }
   h += "</div></div>";
+  h += weekVolSheet(w);
   h += '<section class="sheet"><h2>Bilan de la semaine</h2>';
   h += '<div class="scale"><div class="scale-q"><span>Fatigue générale</span><span class="ends">1 en forme, 10 épuisé</span></div>' + seg("semaines", id, "fatigue", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], wd.fatigue, true) + "</div>";
   h += '<label class="field"><span>Sommeil moyen par nuit (heures)</span>' + inp("semaines", id, "sommeil", wd.sommeil, 'inputmode="decimal" placeholder="ex. 7,5"') + "</label>";
@@ -825,6 +845,7 @@ function viewProgres() {
   h += '<section class="sheet"><h2>Poids</h2>' + (weights.length ? chart([{ pts: weights, cls: "s-steel", dots: true, line: false, soft: true }, { pts: avgs, cls: "s-plate", dots: true, line: true }], { unit: "kg", ref: P.poidsMax ? [{ y: P.poidsMax, label: fmt(P.poidsMax) + " kg, plafond" }] : [] }) +
     '<div class="legend"><span><i class="k-steel"></i>pesées</span><span><i class="k-plate"></i>moyenne de la semaine</span></div>' : '<p class="small muted">Pas encore de pesée. Note ton poids chaque matin dans Aujourd\'hui.</p>') + "</section>";
   h += forceSheet();
+  h += cumulVolSheet();
   var list = valuesOf(D.seances).filter(hasData).sort(function (a, b) { return a.date < b.date ? 1 : -1; }).slice(0, 40);
   h += mensuSheet();
   h += '<section class="sheet"><h2>Séances notées</h2><div class="log">' + (list.length ? list.map(logItem).join("") : '<p class="small muted">Aucune séance notée pour l\'instant.</p>') + "</div></section>";
@@ -869,6 +890,94 @@ function labelZone(k) { for (var i = 0; i < DOULEURS.length; i++) if (zk(DOULEUR
 /* Courbes de force : une par exercice. Clé « cat:<code> » pour un exercice de la liste commune
    (séances libres et exercices du programme qui portent ce code), « ex:<id> » pour un exercice
    du programme actif sans code. Les exercices au temps et les « autres exercices » n'ont pas de courbe. */
+/* ---------- Volume (séries de travail par muscle) ---------- */
+function volRows(obj, time) {
+  return valuesOf(obj || {}).filter(function (r) {
+    if (!r) return false;
+    if (time) return toNum(r.t) > 0;
+    var rir = toNum(r.rir);
+    return toNum(r.r) > 0 && (rir === null || rir <= RIR_MAX_SERIE);
+  }).length;
+}
+function emptyVol() { var v = { m: {}, g: {} }; MUSCLES.forEach(function (m) { v.m[m[0]] = 0; }); GROUPES.forEach(function (g) { v.g[g[0]] = 0; }); return v; }
+function addVol(v, mu, gr, n) {
+  if (!n || !mu) return;
+  keysOf(mu).forEach(function (k) { if (v.m[k] !== undefined) v.m[k] += n * mu[k]; });
+  if (gr && v.g[gr] !== undefined) v.g[gr] += n;
+}
+function seanceVol(s, v) {
+  if (s.type === LIBRE) {
+    (s.liste || []).forEach(function (it) {
+      var c = CAT[it.k], rows = s.sets && s.sets[it.u];
+      if (!rows) return;
+      if (it.k === "autre") { if (it.mu && MUSCLE_GROUPE[it.mu]) { var o = {}; o[it.mu] = 1; addVol(v, o, MUSCLE_GROUPE[it.mu], volRows(rows, false)); } return; }
+      if (c && c.mu) addVol(v, c.mu, c.gr, volRows(rows, c.time));
+    });
+    return;
+  }
+  keysOf(s.sets).forEach(function (exId) { var e = progEx(s, exId); if (e && e.mu) addVol(v, e.mu, e.gr, volRows(s.sets[exId], false)); });
+  keysOf(s.remp).forEach(function (exId) { var r = s.remp[exId], e = progEx(s, exId); if (r && r.sets && e && e.mu) addVol(v, e.mu, e.gr, volRows(r.sets, false)); });
+}
+function doneVol(from, to) {
+  var v = emptyVol();
+  valuesOf(D.seances).forEach(function (s) { if (s.date >= from && s.date <= to) seanceVol(s, v); });
+  return v;
+}
+function plannedTypes(date) {
+  var t = plannedFor(date); if (t) return t;
+  var ks = versionKeys(); return (P.versions[ks[0]].jours[dow(date)] || []).map(function (x) { return x.replace("?", ""); });
+}
+function plannedVol(from, to) {
+  var v = emptyVol();
+  for (var d = from; d <= to; d = addDays(d, 1)) {
+    if (d < P.debut || d > lastDay() || weekOf(d) > P.semaines) continue;
+    var w = weekOf(d);
+    plannedTypes(d).forEach(function (t) {
+      var def = P.sessions[t]; if (!def || def.kind !== "muscu") return;
+      def.ex.forEach(function (e) { var p = presc(e, w), c = CAT[e.cat], mu = e.mu || (c && c.mu), gr = e.gr || (c && c.gr); if (p && mu) addVol(v, mu, gr, p.sets); });
+    });
+  }
+  return v;
+}
+function volBar(label, done, plan, mx, ref, big) {
+  var aria = label + " : " + fmt(done) + " séries faites sur " + fmt(plan) + " prévues";
+  return '<div class="vrow' + (big ? " grp" : "") + '" role="img" aria-label="' + esc(aria) + '"><span class="m">' + esc(label) + '</span><span class="track">' +
+    (plan ? '<span class="plan" data-w="' + (plan / mx * 100).toFixed(1) + '"></span>' : "") +
+    (done ? '<span class="done" data-w="' + (done / mx * 100).toFixed(1) + '"></span>' : "") +
+    (ref ? '<span class="ref" data-l="' + (ref / mx * 100).toFixed(1) + '"></span>' : "") +
+    '</span><span class="v"><b>' + fmt(done) + "</b> / " + fmt(plan) + "</span></div>";
+}
+function volSheet(o) {
+  var view = D.vue && D.vue[o.key] === "g" ? "g" : "m", done = o.done, plan = o.plan, h = '<section class="sheet"><div class="titled"><h2>' + esc(o.title) + '</h2><p class="small muted">' + esc(o.sub) + "</p></div>";
+  h += '<div class="seg" role="group"><button type="button" data-act="volvue" data-k="' + o.key + '" data-v="m" aria-pressed="' + (view === "m") + '">Par muscle</button><button type="button" data-act="volvue" data-k="' + o.key + '" data-v="g" aria-pressed="' + (view === "g") + '">Par groupe</button></div><div class="vol">';
+  function top(vals, extra) { var m = Math.max.apply(null, vals.concat([extra || 0, 1])), step = m <= 20 ? 5 : 10; return Math.ceil(m / step) * step; }
+  if (view === "m") {
+    var mx = top(MUSCLES.map(function (m) { return Math.max(done.m[m[0]], plan.m[m[0]]); }), Math.max(20, o.ref || 0));
+    MUSCLES.forEach(function (m) { h += volBar(m[1], done.m[m[0]], plan.m[m[0]], mx, o.ref, false); });
+  } else {
+    var mg = top(GROUPES.map(function (g) { return Math.max(done.g[g[0]], plan.g[g[0]]); }));
+    GROUPES.forEach(function (g) { h += volBar(g[1], done.g[g[0]], plan.g[g[0]], mg, 0, true) + '<p class="vsub">' + esc(g[2]) + "</p>"; });
+  }
+  h += '</div><div class="keyrow"><span><i class="k-done"></i>fait</span><span><i class="k-plan"></i>prévu</span>' + (view === "m" && o.ref ? '<span><i class="k-ref"></i>' + esc(o.refLabel) + "</span>" : "") + "</div>";
+  h += '<details class="calc"><summary class="small">Comment c\'est calculé</summary><ul class="small">' +
+    "<li>Une série compte si elle est notée et finie à 4 répétitions de l'échec ou moins (RIR 4 au plus). Les échauffements ne sont pas notés, donc pas comptés.</li>" +
+    "<li>Par muscle : 1 série pour le muscle travaillé directement, 0,5 pour un muscle qui aide (méthode de Pelland et al., Sports Medicine, 2026). Un développé couché compte 1 pour les pectoraux, 0,5 pour les triceps et 0,5 pour les épaules.</li>" +
+    "<li>Par groupe : chaque série compte une fois, dans le groupe de son mouvement. Un développé couché est une série de poussée, un face pull une série de tirage.</li>" +
+    "<li>Les séances libres comptent ; un «\u00a0autre exercice\u00a0» compte pour le muscle choisi. Les exercices sautés, le cou et le sambo ne sont pas comptés.</li>" +
+    "<li>Repère : 10 séries par muscle et par semaine, seuil au-delà duquel les études montrent nettement plus de prise de muscle.</li></ul></details>";
+  return h + "</section>";
+}
+function weekVolSheet(w) {
+  var mon = mondayOf(w), sun = addDays(mon, 6);
+  return volSheet({ key: "volSem", title: "Volume de la semaine", sub: "Séries de travail par muscle, faites et prévues par le programme.", done: doneVol(mon, sun), plan: plannedVol(mon, sun), ref: 10, refLabel: "repère : 10 séries" });
+}
+function cumulVolSheet() {
+  var today = todayStr();
+  if (today < P.debut) return '<section class="sheet"><h2>Volume depuis le début du bloc</h2><p class="small muted">Le cumul commence le ' + esc(fmtLong(P.debut)) + ".</p></section>";
+  var to = today > lastDay() ? lastDay() : today, n = Math.min(P.semaines, weekOf(to));
+  return volSheet({ key: "volCum", title: "Volume depuis le début du bloc", sub: "Séries de travail cumulées du " + fmtShort(P.debut) + " au " + fmtShort(to).replace(/\.$/, "") + ". Prévu : ce que le programme prévoyait jusqu'à ce jour.",
+    done: doneVol(P.debut, to), plan: plannedVol(P.debut, to), ref: 10 * n, refLabel: "repère : 10 séries × " + n + " semaine" + (n > 1 ? "s" : "") });
+}
 function progOrder(id) {
   var n = 0, found = -1;
   keysOf(P.sessions).forEach(function (k) { var s = P.sessions[k]; if (s.kind === "muscu") s.ex.forEach(function (e) { if (e.id === id && found < 0) found = n; n++; }); });
@@ -1007,7 +1116,7 @@ function summarize(s) {
   if (isLib) (s.liste || []).forEach(function (it) {
     var c = CAT[it.k], rows = valuesOf((s.sets && s.sets[it.u]) || {}).filter(function (x) { return x && (toNum(x.c) !== null || toNum(x.r) || toNum(x.t)); });
     if (!rows.length) return;
-    var nm = libreName(it) + (it.k === "autre" ? " (hors liste)" : c && c.per ? " (kg par haltère)" : c && c.bw ? " (lest)" : "");
+    var nm = libreName(it) + (it.k === "autre" ? " (hors liste" + (it.mu ? ", " + muscleName(it.mu).toLowerCase() : "") + ")" : c && c.per ? " (kg par haltère)" : c && c.bw ? " (lest)" : "");
     parts.push(nm + " : " + rows.map(function (x) { return c && c.time ? (toNum(x.c) ? "+" + x.c + " kg " : "") + (x.t || "?") + " s, marge " + (x.m !== undefined ? x.m : "?") + " s" : (x.c !== undefined ? x.c : "?") + "×" + (x.r || "?") + "@" + (x.rir !== undefined ? x.rir : "?"); }).join(", "));
   });
   if (!isLib) keysOf(s.sets).forEach(function (k) { var rows = valuesOf(s.sets[k]).filter(function (x) { return toNum(x.c) !== null || toNum(x.r); }); if (rows.length) parts.push(k + " : " + rows.map(function (x) { return (x.c !== undefined ? x.c : "?") + "×" + (x.r || "?") + "@" + (x.rir !== undefined ? x.rir : "?"); }).join(", ")); });
@@ -1054,6 +1163,7 @@ function buildPrompt(kind, question) {
   return "Tu es mon préparateur physique. Réponds en français, en me tutoyant.\n\nMON PROGRAMME ET SES RÈGLES\n" + (P.contexte || "") +
     "\n\nAUJOURD'HUI : " + fmtLong(date) + ", " + weekLabel(date).toLowerCase() + ".\nSéance prévue :\n" + planText(date) +
     "\n\nMES SÉANCES DES 21 DERNIERS JOURS (exercice : charge×reps@RIR ; pour les tractions, les dips et les pompes, la charge est le lest ; en séance libre, exercice au temps : durée et marge en secondes)\n" + hist +
+    "\n\nVOLUME DE LA SEMAINE " + w + " (séries de travail fractionnées, faites / prévues) : " + volText(w) +
     "\n\nPESÉES : " + pes + "\nMOYENNES PAR SEMAINE : " + (avgs.join(", ") || "aucune") + "\nBILANS DE SEMAINE :\n" + bilans +
     "\n\nMA DEMANDE\n" + ask +
     "\n\nFORMAT : 180 mots maximum, phrases courtes ou puces, chiffres précis. Reste dans la logique du programme sans le réécrire. S'il manque des données, dis lesquelles noter. Une séance arrêtée pour manque de temps ou imprévu, ou un exercice remplacé faute de matériel, ne signale pas une baisse de forme. Pas de diagnostic médical : une douleur qui dure ou augmente se montre à un professionnel de santé. Si tu proposes de modifier le programme, rappelle en une ligne que mon coach valide les changements.";
@@ -1173,6 +1283,7 @@ app.addEventListener("click", function (ev) {
       else sel.push(ck);
       D.vue.courbes = sel; persist(); render(); break;
     case "courbemode": D.vue.mode = b.dataset.v; persist(); render(); break;
+    case "volvue": D.vue[b.dataset.k] = b.dataset.v; persist(); render(); break;
     case "ask": ask(b.dataset.q); break;
     case "export": exportData(); break;
     case "copylink": copyText(D.liens[P.id]).then(function (ok) { toast(ok ? "Lien copié." : "Copie impossible sur ce navigateur."); }); break;

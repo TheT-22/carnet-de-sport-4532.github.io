@@ -290,3 +290,23 @@ details summary { cursor: pointer; color: var(--plate); font-weight: 600; paddin
   .kpis { grid-template-columns: 1fr 1fr; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* ---------- Volume par muscle ---------- */
+.vol { display: grid; gap: 10px; }
+.vrow { display: grid; grid-template-columns: 104px minmax(0, 1fr) 64px; gap: 10px; align-items: center; }
+.vrow .m { font-size: 14px; }
+.vrow .v { font-size: 14px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.vrow .v b { font-weight: 650; }
+.track { position: relative; height: 16px; border-radius: 5px; background: var(--chalk); }
+.vrow.grp .track { height: 22px; }
+.track .plan { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 5px; border: 1.5px dashed var(--plate); background: var(--plate-soft); }
+.track .done { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 5px; background: var(--plate); }
+.track .ref { position: absolute; top: -4px; bottom: -4px; width: 0; border-left: 1.5px dashed var(--steel); }
+.vsub { margin: -6px 0 0 114px; font-size: 13px; color: var(--steel); }
+.keyrow { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--steel); align-items: center; }
+.keyrow i { display: inline-block; width: 16px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: middle; }
+.keyrow .k-done { background: var(--plate); }
+.keyrow .k-plan { background: var(--plate-soft); border: 1.5px dashed var(--plate); }
+.keyrow .k-ref { width: 0; height: 14px; border-left: 1.5px dashed var(--steel); border-radius: 0; }
+.calc ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 6px; }
+@media (max-width: 380px) { .vrow { grid-template-columns: 92px minmax(0, 1fr) 58px; } .vsub { margin-left: 102px; } }
