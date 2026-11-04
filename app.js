@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.4.0";
+var APP_VERSION = "1.4.1";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -609,12 +609,13 @@ function modPanel(e, p, s, id, mod, planned, rirT, date) {
       h += '<label class="field"><span>Ou écris son nom, s\'il n\'est pas dans la bibliothèque</span>' + inp("seances", id, "remp." + e.id + ".nom", rp.nom, 'placeholder="Nom de l\'exercice"') + "</label>";
     }
     if (rc || rp.nom) {
-      var last = rc ? lastCat(rp.k, date) : lastRemp(rp.nom, date), step = rc ? (rc.per ? 2 : 2.5) : (e.step || 2.5);
+      var rk2 = rempCat(rp); if (!rc && rk2) rc = CAT[rk2];
+      var last = rc ? lastCat(rk2, date) : lastRemp(rp.nom, date), step = rc ? (rc.per ? 2 : 2.5) : (e.step || 2.5);
       var bwThen = rc && rc.bw && last ? bodyweight(last.date) * (rc.bwf || 1) : 0, bwNow = rc && rc.bw ? bodyweight(date) * (rc.bwf || 1) : 0;
       var load = last ? targetFrom(last, p, step, bwThen, bwNow) : null, le = { bw: !!(rc && rc.bw) };
       h += '<p class="advice">' + (last ? "Charge conseillée : " + esc(loadLabel(le, load)) + ' <span class="muted">(dernière fois le ' + esc(fmtShort(last.date)) + ")</span>" : "Première fois sur cet exercice : choisis la charge au RIR visé, même nombre de séries et de reps.") + "</p>";
       h += setRows(id, "remp." + e.id + ".sets", rows, Math.max(planned, keysOf(rows).length), { head: rc && rc.bw ? "Lest (kg)" : rc && rc.per ? "kg / haltère" : "Charge (kg)", load: load, reps: p.repsN, rir: rirT });
-      h += '<p class="small muted">' + (rc ? "Ces séries comptent pour « " + esc(rc.n) + " » dans tes courbes de force et ton volume. Elles ne changent pas les charges conseillées de « " + esc(e.name) + " »."
+      h += '<p class="small muted">' + (rc ? (rp.k ? "" : "Reconnu dans la bibliothèque : « " + esc(rc.n) + " ». ") + "Ces séries comptent pour « " + esc(rc.n) + " » dans tes courbes de force et ton volume. Elles ne changent pas les charges conseillées de « " + esc(e.name) + " »."
         : "Ces séries comptent dans ton volume pour les muscles de « " + esc(e.name) + " », mais n'ont pas de courbe de force et ne changent pas ses charges conseillées. Choisis l'exercice dans la bibliothèque pour qu'il ait sa courbe.") + "</p>";
     }
   }
@@ -663,7 +664,7 @@ function catRows(s, k) {
   var out = [];
   if (s.type === LIBRE) (s.liste || []).forEach(function (it) { if (it.k === k && s.sets && s.sets[it.u]) out = out.concat(rowsFor(CAT[k], s.sets[it.u])); });
   else if (s.sets) keysOf(s.sets).forEach(function (exId) { var e = progEx(s, exId); if (e && e.cat === k) out = out.concat(rowsOk(s.sets[exId])); });
-  if (s.type !== LIBRE) keysOf(s.remp).forEach(function (exId) { var r = s.remp[exId]; if (r && r.k === k && r.sets) out = out.concat(rowsOk(r.sets)); });
+  if (s.type !== LIBRE) keysOf(s.remp).forEach(function (exId) { var r = s.remp[exId]; if (r && r.sets && rempCat(r) === k) out = out.concat(rowsOk(r.sets)); });
   return out;
 }
 function byDateDesc(a, b) { return a.date < b.date ? 1 : -1; }
@@ -817,6 +818,8 @@ function rempMenu(id, exId, e) {
   h += '<div><button type="button" class="btn wide" data-sh="cancel">Fermer</button></div>';
   openSheet(h, function (b, close) { close(); if (b.dataset.sh === "pick") setRemp(id, exId, b.dataset.k); }, true);
 }
+/* Exercice de bibliothèque d'un remplacement : choisi dans la liste, ou reconnu d'après le nom écrit */
+function rempCat(r) { if (!r) return ""; if (r.k && CAT[r.k]) return r.k; return bankMatch(r.nom); }
 function setRemp(id, exId, k) {
   var doc = docFor("seances", id), rp = (doc.remp && doc.remp[exId]) || {};
   if (k) { rp.k = k; rp.nom = CAT[k].n; } else { delete rp.k; delete rp.nom; }
@@ -1023,7 +1026,7 @@ function seanceVol(s, v) {
   }
   keysOf(s.sets).forEach(function (exId) { var e = progEx(s, exId); if (e && e.mu) addVol(v, e.mu, e.gr, volRows(s.sets[exId], false)); });
   keysOf(s.remp).forEach(function (exId) {
-    var r = s.remp[exId], e = progEx(s, exId), rc = r && r.k ? CAT[r.k] : null;
+    var r = s.remp[exId], e = progEx(s, exId), rc = CAT[rempCat(r)] || null;
     if (!r || !r.sets) return;
     if (rc && rc.mu) addVol(v, rc.mu, rc.gr, volRows(r.sets, false));
     else if (e && e.mu) addVol(v, e.mu, e.gr, volRows(r.sets, false));
@@ -1126,7 +1129,7 @@ function curveIndex() {
       (s.liste || []).forEach(function (it) { var c = CAT[it.k]; if (c && !c.time && s.sets[it.u]) add("cat:" + it.k, c.n, CAT_ORDER[it.k], c.bw, c.bwf, s, rowsOk(s.sets[it.u]), true); });
       return;
     }
-    keysOf(s.remp).forEach(function (exId) { var r = s.remp[exId], c = r && r.k ? CAT[r.k] : null; if (c && !c.time && r.sets) add("cat:" + r.k, c.n, CAT_ORDER[r.k], c.bw, c.bwf, s, rowsOk(r.sets), false); });
+    keysOf(s.remp).forEach(function (exId) { var r = s.remp[exId], rk = rempCat(r), c = CAT[rk]; if (c && !c.time && r.sets) add("cat:" + rk, c.n, CAT_ORDER[r.k], c.bw, c.bwf, s, rowsOk(r.sets), false); });
     keysOf(s.sets).forEach(function (exId) {
       var e = progEx(s, exId); if (!e) return;
       if (e.cat && CAT[e.cat]) add("cat:" + e.cat, CAT[e.cat].n, CAT_ORDER[e.cat], e.bw, CAT[e.cat].bwf, s, rowsOk(s.sets[exId]), false);
