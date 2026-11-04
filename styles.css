@@ -358,3 +358,14 @@ details summary { cursor: pointer; color: var(--plate); font-weight: 600; paddin
 .type span { font-size: 14px; color: var(--steel); }
 .type .hint { color: var(--plate); font-weight: 550; }
 @media (max-width: 380px) { .rep, .rep-head { grid-template-columns: 20px 1fr 1fr 66px; } .grid3 { gap: 6px; } }
+
+/* ---------- Bande des jours : changer de semaine ---------- */
+.weeknav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: -10px; }
+.weeknav .wk { display: grid; justify-items: center; }
+.weeknav .wk b { font-size: 16px; font-weight: 650; }
+.daystrip { touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+.daystrip.slide-next { animation: strip-next .22s ease-out; }
+.daystrip.slide-prev { animation: strip-prev .22s ease-out; }
+@keyframes strip-next { from { transform: translateX(28%); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes strip-prev { from { transform: translateX(-28%); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .daystrip.slide-next, .daystrip.slide-prev { animation: none; } }

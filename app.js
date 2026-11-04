@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.5.0";
+var APP_VERSION = "1.5.1";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -364,7 +364,7 @@ var MOTIFS_ARRET = [{ v: "temps", l: "Manque de temps" }, { v: "imprevu", l: "Im
 function motifLabel(list, v) { for (var i = 0; i < list.length; i++) if (list[i].v === v) return list[i].l.toLowerCase(); return "motif non précisé"; }
 
 /* ================= Interface : état ================= */
-var S = { view: "jour", date: null, week: 1, prompt: "", updateReady: false, pendingCode: null };
+var S = { view: "jour", date: null, week: 1, prompt: "", updateReady: false, pendingCode: null, stripMon: null, stripFor: null, slide: null, swipeAt: 0 };
 S.date = initialDate(); S.mon = mondayOfDate(S.date);
 var app = document.getElementById("app");
 var isStandalone = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone === true;
@@ -481,14 +481,21 @@ function privacyNote() {
 /* ---------- Aujourd'hui ---------- */
 function viewJour() {
   var date = S.date, w = inBlock(date) ? weekOf(date) : null, plan = plannedFor(date), h = "";
-  var mon = mondayOfDate(date);
-  h += '<div class="daystrip" role="group" aria-label="Jours de la semaine">';
+  if (!S.stripMon || S.stripFor !== date) { S.stripMon = mondayOfDate(date); S.stripFor = date; }
+  var mon = S.stripMon, sunS = addDays(mon, 6), pm = parse(mon), ps = parse(sunS);
+  var range = "Du " + pm.getDate() + (pm.getMonth() === ps.getMonth() ? "" : " " + fmtShort(mon).replace(/^\d+\s*/, "")) + " au " + fmtShort(sunS);
+  var wt = blockWeek(mon) ? "Semaine " + weekOf(mon) : P && mon < P.debut ? "Avant le bloc" : P && mon > lastDay() ? "Après le bloc" : "Semaine du " + fmtShort(mon).replace(/\.$/, "");
+  h += '<div class="weeknav"><button type="button" class="icon-btn" data-act="stripweek" data-d="-1" aria-label="Semaine précédente"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 3L5 9l6 6"/></svg></button>' +
+    '<div class="wk"><b>' + esc(wt) + '</b><span class="tiny muted">' + esc(range) + '</span></div>' +
+    '<button type="button" class="icon-btn" data-act="stripweek" data-d="1" aria-label="Semaine suivante"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3l6 6-6 6"/></svg></button></div>';
+  h += '<div class="daystrip' + (S.slide ? " slide-" + S.slide : "") + '" role="group" aria-label="Jours de la semaine, fais glisser pour changer de semaine">';
+  S.slide = null;
   for (var i = 0; i < 7; i++) {
     var d = addDays(mon, i), done = dayDone(d);
     h += '<button type="button" class="day' + (d === todayStr() ? " today" : "") + '" data-act="goto" data-date="' + d + '"' + (d === date ? ' aria-current="date"' : "") + ' aria-label="' + esc(fmtLong(d)) + '"><span class="dn">' + esc(fmtDayName(d)) + '</span><span class="dd">' + parse(d).getDate() + '</span><span class="dot ' + (done === true ? "done" : done === false ? "todo" : "") + '"></span></button>';
   }
   h += "</div>";
-  h += '<div class="daynav"><h1>' + esc(fmtLong(date)) + "</h1>" + (date !== initialDate() ? '<button type="button" class="linkbtn" data-act="today">Aujourd\'hui</button>' : "") + "</div>";
+  h += '<div class="daynav"><h1>' + esc(fmtLong(date)) + "</h1>" + (date !== initialDate() || S.stripMon !== mondayOfDate(initialDate()) ? '<button type="button" class="linkbtn" data-act="today">Aujourd\'hui</button>' : "") + "</div>";
   h += '<p class="small muted">' + esc(weekLabel(date)) + "</p>";
   if (P && todayStr() < P.debut && date === P.debut) h += '<div class="note info">Le bloc commence le ' + esc(fmtLong(P.debut)) + ". Voici la première séance.</div>";
   if (!isStandalone && !D.astuceVue) h += '<div class="note info row"><span class="grow">Installe l\'application sur ton écran d\'accueil pour l\'utiliser sans réseau et protéger tes données.</span><button type="button" class="btn small" data-act="view" data-v="reglages">Comment faire</button></div>';
@@ -1995,8 +2002,9 @@ app.addEventListener("click", function (ev) {
   var b = ev.target.closest("[data-act]"); if (!b || b.tagName === "SELECT" || b.tagName === "INPUT") return;
   var a = b.dataset.act, doc;
   switch (a) {
-    case "goto": S.date = b.dataset.date; S.view = "jour"; S.prompt = ""; render(); if (b.classList.contains("wrow") || b.classList.contains("log-item")) window.scrollTo(0, 0); break;
-    case "today": S.date = initialDate(); S.prompt = ""; render(); break;
+    case "goto": if (b.classList.contains("day") && Date.now() - S.swipeAt < 400) break; S.date = b.dataset.date; S.view = "jour"; S.prompt = ""; render(); if (b.classList.contains("wrow") || b.classList.contains("log-item")) window.scrollTo(0, 0); break;
+    case "today": S.date = initialDate(); S.stripMon = null; S.prompt = ""; render(); break;
+    case "stripweek": stripWeek(Number(b.dataset.d)); break;
     case "view": S.view = b.dataset.v; D.astuceVue = true; persist(); render(); window.scrollTo(0, 0); break;
     case "week": S.mon = addDays(S.mon, 7 * Number(b.dataset.d)); render(); break;
     case "sansprog": D.sansProgramme = true; persistNow(); S.date = todayStr(); S.mon = mondayOfDate(S.date); S.view = "jour"; render(); window.scrollTo(0, 0); break;
@@ -2061,6 +2069,16 @@ app.addEventListener("click", function (ev) {
       break;
     case "update": if (swReg && swReg.waiting) swReg.waiting.postMessage("skipWaiting"); break;
   }
+});
+/* Bande des jours : glisser vers la gauche ou la droite change de semaine */
+function stripWeek(d) { S.stripMon = addDays(S.stripMon || mondayOfDate(S.date), 7 * d); S.slide = d > 0 ? "next" : "prev"; render(); }
+var swipe = null;
+app.addEventListener("pointerdown", function (ev) { var el = ev.target.closest(".daystrip"); swipe = el ? { x: ev.clientX, y: ev.clientY } : null; });
+app.addEventListener("pointercancel", function () { swipe = null; });
+app.addEventListener("pointerup", function (ev) {
+  if (!swipe) return;
+  var dx = ev.clientX - swipe.x, dy = ev.clientY - swipe.y; swipe = null;
+  if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.5) { S.swipeAt = Date.now(); stripWeek(dx < 0 ? 1 : -1); }
 });
 app.addEventListener("change", function (ev) {
   var el = ev.target;
