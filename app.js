@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.4.1";
+var APP_VERSION = "1.4.2";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -90,7 +90,8 @@ var CATALOGUE = [
     { k: "el-lat", n: "Élévations latérales, haltères", per: true, gr: "push", mu: { epaules: 1 } },
     { k: "el-lat-poulie", n: "Élévation latérale à la poulie", gr: "push", mu: { epaules: 1 } }] },
   { g: "Tirage · dos", ex: [
-    { k: "tractions", n: "Tractions", bw: true, gr: "pull", mu: { dorsal: 1, biceps: 0.5 } },
+    { k: "tractions", n: "Tractions, pronation", bw: true, gr: "pull", mu: { dorsal: 1, biceps: 0.5 } },
+    { k: "tractions-neutre", n: "Tractions, prise neutre", bw: true, gr: "pull", mu: { dorsal: 1, biceps: 0.5 } },
     { k: "tirage-vert", n: "Tirage vertical", gr: "pull", mu: { dorsal: 1, biceps: 0.5 } },
     { k: "tirage-horiz", n: "Tirage horizontal à la poulie", gr: "pull", mu: { dorsal: 1, trapezes: 0.5, biceps: 0.5 } },
     { k: "row-barre", n: "Rowing, barre", gr: "pull", mu: { dorsal: 1, trapezes: 0.5, biceps: 0.5 } },
@@ -131,7 +132,7 @@ var BANK_MATCH = [
   ["dm-halt", ["developpe militaire", "haltere"]], ["dm-barre", ["developpe militaire"]], ["dips", ["dips"]], ["pompes", ["pompe"]],
   ["el-lat-poulie", ["elevation", "lateral", "poulie"]], ["el-lat", ["elevation", "lateral"]], ["ecarte-poulie", ["ecarte", "poulie"]],
   ["tirage-vert", ["tirage vertical"]], ["tirage-horiz", ["tirage horizontal"]], ["row-1b", ["rowing", "un bras"]], ["row-barre", ["rowing", "barre"]],
-  ["tractions", ["traction"]], ["curl-incl", ["curl", "incline"]], ["curl-halt", ["curl", "haltere"]], ["curl-barre", ["curl", "barre"]],
+  ["tractions-neutre", ["traction", "neutre"]], ["tractions", ["traction"]], ["curl-incl", ["curl", "incline"]], ["curl-halt", ["curl", "haltere"]], ["curl-barre", ["curl", "barre"]],
   ["ext-tete", ["extension", "triceps", "tete"]], ["ext-halt", ["extension", "triceps", "haltere"]], ["ext-poulie", ["extension", "triceps", "poulie"]],
   ["squat", ["squat", "barre"]], ["hack-squat", ["hack"]], ["fente-bulg", ["fente bulgare"]],
   ["sdtr-halt", ["roumain", "haltere"]], ["sdtr-barre", ["roumain"]], ["sdt", ["souleve de terre"]], ["mollets", ["mollet"]]
