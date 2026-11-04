@@ -6,11 +6,11 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.4.2";
+var APP_VERSION = "1.5.0";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
-function emptyData() { return { v: 1, actif: null, programmes: {}, liens: {}, seances: {}, pesees: {}, semaines: {}, vue: {} }; }
+function emptyData() { return { v: 1, actif: null, programmes: {}, liens: {}, seances: {}, pesees: {}, semaines: {}, vue: {}, profil: {} }; }
 function normalize(d) {
   var e = emptyData();
   if (!d || typeof d !== "object") return e;
@@ -193,8 +193,15 @@ function validateProgram(p) {
    même si le programme est modifié ou remplacé ensuite. */
 function freezeSession(s, prog) {
   if (!s || s.plan || !prog || s.programme !== prog.id || !hasData(s)) return false;
-  var def = prog.sessions[s.type]; if (!def || def.kind !== "muscu") return false;
+  var def = prog.sessions[s.type]; if (!def) return false;
   var w = s.semaine || (Math.floor(diffDays(s.date, prog.debut) / 7) + 1);
+  if (def.kind === "course") {
+    if (s.legacy || s.ftexte || !def.plan) return false;
+    var pl = def.plan[w - 1] || def.plan[def.plan.length - 1]; if (!pl || pl.test) return false;
+    s.ftexte = pl.texte || " "; if (pl.fr) s.fplan = JSON.parse(JSON.stringify(pl.fr));
+    return true;
+  }
+  if (def.kind !== "muscu") return false;
   s.plan = { name: def.name, short: def.short || def.name, ex: def.ex.map(function (e) {
     var p = presc(e, w); if (!p) return null;
     return { id: e.id, name: e.name, bw: !!e.bw, cat: exCat(e), mu: e.mu || null, gr: e.gr || "", step: e.step || 2.5, rest: e.rest, ss: e.ss || "", note: e.note || "", alt: e.alt || [], p: p };
@@ -208,6 +215,12 @@ function freezeAll(onlyPast) {
     if (freezeSession(s, D.programmes[s.programme])) changed = true;
   });
   return changed;
+}
+/* Version 1.5 : les séances de course déjà notées gardent leur ancienne saisie */
+function migrateCardio() {
+  if (D.cardioMig) return false;
+  valuesOf(D.seances).forEach(function (s) { var prog = D.programmes[s.programme], def = prog && prog.sessions ? prog.sessions[s.type] : null; if (def && def.kind === "course" && hasData(s)) s.legacy = true; });
+  D.cardioMig = 1; return true;
 }
 function installProgram(p, link) {
   freezeAll(false);
@@ -231,7 +244,7 @@ function inBlock(date) { return !!P && date >= P.debut && date <= lastDay(); }
 function mondayOfDate(date) { return addDays(date, -dow(date)); }
 function blockWeek(mon) { return !!P && mon >= P.debut && mon <= lastDay() && weekOf(mon) <= P.semaines; }
 function anyData(date) { return valuesOf(D.seances).some(function (s) { return s.date === date && s.type !== "REPOS" && hasData(s); }); }
-function sessionLabel(s) { if (s.type === LIBRE) return "Séance libre"; if (s.plan) return s.plan.short; var d = sessionDef(s.type); return d ? d.short || d.name : s.type; }
+function sessionLabel(s) { if (s.type === LIBRE) return "Séance libre"; if (isCardioType(s.type)) return cardioTitle(s); if (s.plan) return s.plan.short; var d = sessionDef(s.type); return d ? d.short || d.name : s.type; }
 
 function plannedFor(date) {
   if (!P || date < P.debut) return [];
@@ -260,7 +273,7 @@ function plannedFor(date) {
   if (date === P.debut && P.sessions.MENSU) out.unshift("MENSU");
   return out;
 }
-var NOT_DATA = ["date", "type", "semaine", "programme", "checkin", "ajoutee", "maj", "libre", "lieu", "remplace", "liste", "nU"];
+var NOT_DATA = ["date", "type", "semaine", "programme", "checkin", "ajoutee", "maj", "libre", "lieu", "remplace", "liste", "nU", "cardio", "sport", "ctype", "fmt", "velMes", "nSer", "nRep", "legacy", "fplan", "ftexte"];
 function hasData(s) {
   if (!s) return false;
   return keysOf(s).some(function (k) { return NOT_DATA.indexOf(k) < 0 && s[k] !== undefined && s[k] !== null && JSON.stringify(s[k]) !== "{}"; });
@@ -483,9 +496,10 @@ function viewJour() {
   h += weightSheet(date);
   var types = (plan || []).slice();
   valuesOf(D.seances).forEach(function (s) { if (s.date === date && types.indexOf(s.type) < 0 && s.type !== LIBRE && sessionDef(s.type)) types.push(s.type); });
-  if (!types.length && plan !== null && !libreOf(date)) h += freeSheet(date);
+  if (!types.length && plan !== null && !libreOf(date) && !cardioOf(date).length) h += freeSheet(date);
   types.forEach(function (t) { if (!isReplaced(date, t)) h += sessionSheet(date, t, w); });
   if (libreOf(date)) h += libreSheet(date);
+  cardioOf(date).forEach(function (s) { h += cardioSheet(date, s); });
   h += addSheet(date, types);
   h += claudeSheet("jour");
   return h;
@@ -495,7 +509,7 @@ function freeSheet(date) {
     : date > lastDay() ? "Ton bloc est terminé. Continue en séances libres en attendant le suivant."
     : date < P.debut ? "Le bloc n'a pas encore commencé. Tu peux faire une séance libre."
     : "Rien de prévu par ton programme ce jour-là.";
-  return '<div class="sheet"><h2>' + (inBlock(date) ? "Rien de prévu" : "Séance libre") + '</h2><p class="small muted">' + esc(t) + '</p><div><button type="button" class="btn primary" data-act="librestart" data-t="">Faire une séance libre</button></div></div>';
+  return '<div class="sheet"><h2>' + (inBlock(date) ? "Rien de prévu" : "Séance libre") + '</h2><p class="small muted">' + esc(t) + '</p><div class="row"><button type="button" class="btn primary" data-act="librestart" data-t="">Faire une séance libre</button><button type="button" class="btn" data-act="cardiostart">Activité cardio</button></div></div>';
 }
 function weekLabel(date) {
   if (!P) return "Séances libres";
@@ -523,7 +537,7 @@ function weightSheet(date) {
 function addSheet(date, types) {
   var opts = (inBlock(date) ? keysOf(P.sessions) : ["MENSU"]).filter(function (t) { return types.indexOf(t) < 0; });
   return '<label class="field" for="add-s"><span>' + (inBlock(date) ? "Séance faite un autre jour, rattrapage, séance en plus ou séance libre" : "Séance libre ou mensurations") + '</span><select id="add-s" data-act="add"><option value="">Ajouter une séance à ce jour</option>' +
-    (libreOf(date) ? "" : '<option value="' + LIBRE + '">Séance libre (hors salle)</option>') +
+    (libreOf(date) ? "" : '<option value="' + LIBRE + '">Séance libre (hors salle)</option>') + '<option value="CARDIO">Activité cardio (course, vélo, natation)</option>' +
     opts.map(function (t) { return '<option value="' + t + '">' + esc(sessionName(t, date)) + "</option>"; }).join("") + "</select></label>";
 }
 function sessionSheet(date, type, w) {
@@ -533,7 +547,7 @@ function sessionSheet(date, type, w) {
   var h = '<section class="sheet"><div class="sheet-head"><h2>' + esc(s.plan ? s.plan.name : sessionName(type, date)) + "</h2>" + (def.kind === "repos" ? "" : st) + "</div>";
   if (def.kind === "muscu" && !hasData(s) && !libreOf(date)) h += '<div class="note info stack"><p><b>Pas à ta salle aujourd\'hui ?</b> Compose une séance avec le matériel que tu as sous la main.</p><div><button type="button" class="btn primary small" data-act="librestart" data-t="' + esc(type) + '">Faire une séance libre</button></div></div>';
   if (def.kind === "muscu") h += bodyMuscu(date, def, w, s, id);
-  else if (def.kind === "course") h += bodyCourse(date, def, w, s, id);
+  else if (def.kind === "course") h += courseSession(date, def, w, s, id);
   else if (def.kind === "sport") h += bodySport(def, s, id);
   else if (def.kind === "repos") h += bodyRepos(def, s, id);
   else if (def.kind === "tests") h += bodyTests(def, s, id);
@@ -589,7 +603,7 @@ function bodyMuscu(date, def, w, s, id) {
     }
     h += "</div>";
   });
-  h += '<div class="hr"></div>' + arretBlock(s, id) + bilan(s, id, true);
+  h += '<div class="hr"></div>' + arretBlock(s, id) + bilan(s, id, true, { duree: true, charge: true });
   return h;
 }
 function modPanel(e, p, s, id, mod, planned, rirT, date) {
@@ -634,9 +648,12 @@ function arretBlock(s, id) {
   if (a.motif === "temps" || a.motif === "imprevu") h += '<p class="small muted">Aucune conséquence sur la suite : les charges conseillées restent calculées sur les séries faites.</p>';
   return h + '<div><button type="button" class="btn small quiet" data-act="arretclose" data-id="' + esc(id) + '">Annuler, séance finie normalement</button></div></div>';
 }
-function bilan(s, id, full) {
+function bilan(s, id, full, o) {
   var b = s.bilan || {}, h = '<div class="section"><h3>' + (full ? "Après la séance" : "Bilan") + "</h3>";
+  o = o || {};
   if (full) h += scaleQ(id, "bilan.rpe", "Difficulté globale de la séance", "très facile", "maximale", b.rpe, 10);
+  if (o.duree) h += '<label class="field"><span>Durée de la séance (min), facultatif</span>' + inp("seances", id, "duree", s.duree, 'inputmode="numeric"') + '</label><p class="tiny muted">La durée sert seulement à additionner musculation, sport et cardio dans la charge de la semaine.</p>';
+  if (o.charge) h += '<div data-live="' + esc(id) + '" data-kind="charge">' + chargeLine(s) + "</div>";
   h += '<div class="scale"><div class="scale-q"><span>Douleurs (pas les courbatures)</span></div>' + zones(id, "bilan.douleurs", b.douleurs) + "</div>";
   h += '<label class="field"><span>Remarques</span>' + txt("seances", id, "bilan.note", b.note, "Facultatif : sensations, exercice à changer, machine prise…") + "</label>";
   return h + "</div>";
@@ -708,7 +725,7 @@ function libreSheet(date) {
     (liste.length ? "" : '<p class="small muted">Aucun exercice pour l\'instant.</p>') + "</div>";
   liste.forEach(function (it, i) { h += libreEx(s, id, it, i, date); });
   h += '<button type="button" class="btn outline wide" data-act="libreadd" data-id="' + esc(id) + '">Ajouter un exercice</button>';
-  h += '<div class="hr"></div>' + arretBlock(s, id) + bilan(s, id, true);
+  h += '<div class="hr"></div>' + arretBlock(s, id) + bilan(s, id, true, { duree: true, charge: true });
   return h + "</section>";
 }
 function libreEx(s, id, it, i, date) {
@@ -883,11 +900,24 @@ function bodyCourse(date, def, w, s, id) {
   }
   return h + arretBlock(s, id) + bilan(s, id, true);
 }
+/* Séance de course du programme : nouvelle saisie (format prérempli si le programme le décrit),
+   ancienne saisie pour les séances déjà notées avant la version 1.5 et pour le test */
+function courseSession(date, def, w, s, id) {
+  var vs = s.type ? s : { date: date, type: id.slice(id.lastIndexOf("_") + 1), programme: inBlock(date) ? P.id : null, semaine: w };
+  var ci = cardioInfo(vs);
+  if (!ci || ci.legacy) return bodyCourse(date, def, w, s, id);
+  var h = "";
+  if (ci.texte && ci.texte.trim()) h += '<div class="note info">' + esc(ci.texte) + "</div>";
+  if (def.consignes) h += '<p class="small muted">' + esc(def.consignes) + "</p>";
+  h += checkin(s, id) + '<div class="hr"></div>';
+  return h + cardioBody(date, vs, id, ci);
+}
 function bodySport(def, s, id) {
   var h = '<p class="small muted">Après la séance, note son intensité : elle sert à doser la séance du lendemain.</p>';
   h += '<div class="scale"><div class="scale-q"><span>Intensité de la séance</span></div>' + seg("seances", id, "intensite", ["Légère", "Normale", "Très dure"], s.intensite) + "</div>";
   h += '<label class="field"><span>Minutes de combat ou de travail intense</span>' + inp("seances", id, "combats", s.combats, 'inputmode="numeric" placeholder="ex. 25"') + "</label>";
-  return h + bilan(s, id, false);
+  h += '<label class="field"><span>Durée totale de la séance (min)</span>' + inp("seances", id, "duree", s.duree, 'inputmode="numeric" placeholder="ex. 90"') + "</label>";
+  return h + bilan(s, id, true, { charge: true });
 }
 function bodyRepos(def, s, id) {
   return '<p class="small muted">' + esc(def.texte || "Journée de récupération.") + '</p><label class="field"><span>Footing fait (minutes)</span>' + inp("seances", id, "footing", s.footing, 'inputmode="numeric" placeholder="Laisse vide si repos complet"') + "</label>";
@@ -909,6 +939,559 @@ function bodyMensu(s, id) {
     }).join("") + "</div>";
 }
 
+/* ================= Cardio : course, vélo, natation =================
+   Séances notées dans D.seances : activité ajoutée (type « CARDIO<n> », champs sport et ctype)
+   ou séance de course du programme (kind « course »). Les valeurs proposées en pointillé
+   (placeholder) ne sont jamais enregistrées : seules les valeurs saisies comptent, partout. */
+var SPORTS = [{ v: "course", l: "Course" }, { v: "velo", l: "Vélo" }, { v: "natation", l: "Natation" }];
+var CTYPES = [
+  { v: "recup", l: "Récupération active", d: "Très facile, pour relancer la circulation après une grosse séance." },
+  { v: "ef", l: "Endurance fondamentale", d: "Allure facile et régulière : tu peux tenir une conversation." },
+  { v: "fractionne", l: "Fractionné", d: "Efforts et récupérations en alternance, notés répétition par répétition." },
+  { v: "libre", l: "Sortie libre", d: "Sortie variée, compétition ou test : durée, distance et ressenti." }];
+var NAGES = ["Crawl", "Brasse", "Dos", "Mélange"];
+function listLabel(list, v) { for (var i = 0; i < list.length; i++) if (list[i].v === v) return list[i].l; return ""; }
+function isCardioType(t) { return /^CARDIO\d+$/.test(t || ""); }
+function cardioOf(date) {
+  return valuesOf(D.seances).filter(function (s) { return s.date === date && isCardioType(s.type); })
+    .sort(function (a, b) { return Number(a.type.slice(6)) - Number(b.type.slice(6)); });
+}
+function sportsOn() { var v = D.vue && D.vue.sports; return SPORTS.filter(function (s) { return !v || v[s.v] !== false; }); }
+function defOf(s) {
+  if (s.plan) return { kind: "muscu" };
+  var prog = D.programmes[s.programme];
+  return (prog && prog.sessions && prog.sessions[s.type]) || sessionDef(s.type);
+}
+function coursePlanOf(s, def) { var w = s.semaine || 1; return def.plan ? def.plan[w - 1] || def.plan[def.plan.length - 1] : null; }
+/* Ce que la séance est : discipline, type, format prévu par le programme ; legacy = ancienne saisie */
+function cardioInfo(s) {
+  if (!s) return null;
+  if (isCardioType(s.type)) return { sport: s.sport || "course", ctype: s.ctype || "ef", fr: null, free: true };
+  var def = defOf(s); if (!def || def.kind !== "course") return null;
+  var pl = coursePlanOf(s, def);
+  if (s.legacy || (pl && pl.test)) return { sport: "course", ctype: "fractionne", legacy: true, test: !!(pl && pl.test), fr: null };
+  var fr = s.fplan || (s.ftexte ? null : pl && pl.fr) || null;
+  return { sport: "course", ctype: fr ? "fractionne" : s.ctype || "", fr: fr, prog: true, texte: s.ftexte || (pl ? pl.texte : "") };
+}
+function cardioTitle(s) {
+  var ci = cardioInfo(s); if (!ci) return sessionLabel(s);
+  if (!ci.free) { var def = defOf(s); return def ? def.short || def.name : "Course"; }
+  return listLabel(SPORTS, ci.sport) + " · " + listLabel(CTYPES, ci.ctype).toLowerCase();
+}
+/* ---------- FC et fourchettes ---------- */
+function fcMaxInfo() {
+  var p = D.profil || {}, m = toNum(p.fcmax); if (m) return { v: Math.round(m), est: false };
+  var a = toNum(p.age); if (!a) return null;
+  return { v: Math.round(p.sexe === "F" ? 206 - 0.88 * a : 208 - 0.7 * a), est: true, age: a };
+}
+function fcBands() {
+  var mx = fcMaxInfo(); if (!mx) return null;
+  var p = D.profil || {}, rep = toNum(p.fcrepos);
+  if (p.methode === "karvonen" && rep && rep < mx.v - 20) {
+    var r = mx.v - rep;
+    return { mx: mx, karv: true, rep: rep, recupHi: Math.round(rep + 0.6 * r), efLo: Math.round(rep + 0.6 * r), efHi: Math.round(rep + 0.7 * r) };
+  }
+  return { mx: mx, karv: false, recupHi: Math.round(mx.v * 0.7), efLo: Math.round(mx.v * 0.7), efHi: Math.round(mx.v * 0.8) };
+}
+function bandsNote(b) {
+  if (!b) return "";
+  var src = b.mx.est ? "estimée d'après ton âge (FC max ≈ " + b.mx.v + " bpm, à une dizaine de battements près)" : "calculée sur ta FC max mesurée (" + b.mx.v + " bpm)";
+  return "Fourchette " + src + (b.karv ? ", sur ta réserve cardiaque" : "") + ". En cas de doute, le test de la parole prime.";
+}
+/* ---------- Temps, allures ---------- */
+function parseTm(v) {
+  if (v === null || v === undefined || v === "") return null;
+  var t = String(v).trim().replace(/[’']/g, ":").replace(",", ".");
+  var m = t.match(/^(\d+):(\d{1,2}(?:\.\d+)?)$/); if (m) return Number(m[1]) * 60 + Number(m[2]);
+  var n = toNum(t); return n !== null && n > 0 ? n : null;
+}
+function fmtTm(sec) { sec = Math.round(sec); return Math.floor(sec / 60) + ":" + pad(sec % 60); }
+function fmtDur(min) { min = Math.round(min); return min >= 60 ? Math.floor(min / 60) + " h " + pad(min % 60) : min + " min"; }
+function paceKm(secPerKm) { return fmtTm(secPerKm) + " /km"; }
+/* ---------- Format du fractionné ---------- */
+var FMT_KEYS = ["mode", "effort", "recup", "reps", "series", "entre", "echauf", "calme", "vise"];
+function effFmt(s, ci) {
+  var f = {}, u = s.fmt || {}, p = (ci && ci.fr) || {};
+  FMT_KEYS.forEach(function (k) { f[k] = u[k] !== undefined && u[k] !== "" ? u[k] : p[k]; });
+  if (f.mode !== "distance") f.mode = "temps";
+  f.viseTxt = u.vise !== undefined && u.vise !== "" ? "" : p.viseTxt || "";
+  return f;
+}
+function primKey(sport, mode, s) { if (mode === "distance") return "tm"; if (sport === "velo") return s.velMes === "v" ? "v" : "p"; return "d"; }
+function primVal(row, pk) { if (!row) return null; return pk === "tm" ? parseTm(row.tm) : toNum(row[pk]); }
+function rowAny(row, pk) { return primVal(row, pk) !== null || toNum(row && row.fc) !== null; }
+function fmtVal(v, pk) { return pk === "tm" ? fmtTm(v) : pk === "d" ? fmt(v, 0) + " m" : pk === "p" ? fmt(v, 0) + " W" : fmt(v, 1) + " km/h"; }
+function fmtLine(f) {
+  var ef = toNum(f.effort), rc = toNum(f.recup), n = toNum(f.reps), se = toNum(f.series) || 1;
+  if (!ef || !n) return "";
+  var e = f.mode === "distance" ? fmt(ef, 0) + " m" : ef >= 60 && ef % 60 === 0 ? ef / 60 + " min" : ef >= 60 ? fmtTm(ef) : ef + " s";
+  var r = rc ? (rc >= 60 && rc % 60 === 0 ? rc / 60 + " min" : rc >= 60 ? fmtTm(rc) : rc + " s") : "";
+  return (se > 1 ? se + " × " : "") + n + " × " + e + (r ? " / " + r : "") + (se > 1 && toNum(f.entre) ? " · " + fmt(toNum(f.entre)) + " min entre les séries" : "");
+}
+function fmtSig(sport, f) { return [sport, f.mode, toNum(f.effort), toNum(f.recup), toNum(f.reps), toNum(f.series) || 1].join("|"); }
+function fmtMinutes(f) {
+  var n = toNum(f.reps), se = toNum(f.series) || 1, rc = toNum(f.recup) || 0;
+  var ef = f.mode === "distance" ? parseTm(f.vise) : toNum(f.effort);
+  if (!ef || !n) return null;
+  var sec = se * (n * ef + (n - 1) * rc) + (se - 1) * (toNum(f.entre) || 0) * 60 + ((toNum(f.echauf) || 0) + (toNum(f.calme) || 0)) * 60;
+  return Math.round(sec / 60);
+}
+/* Répétitions saisies, dans l'ordre : série puis répétition */
+function repList(s) {
+  var out = [];
+  keysOf(s.reps).map(Number).sort(function (a, b) { return a - b; }).forEach(function (i) {
+    keysOf(s.reps[i]).map(Number).sort(function (a, b) { return a - b; }).forEach(function (j) { var r = s.reps[i][j]; if (r) out.push({ i: i, j: j, row: r }); });
+  });
+  return out;
+}
+function fracData(s, ci) {
+  var f = effFmt(s, ci), pk = primKey(ci.sport, f.mode, s), vals = [], fcs = [], work = 0, ef = toNum(f.effort) || 0;
+  repList(s).forEach(function (x) {
+    if (!rowAny(x.row, pk)) return;
+    var v = primVal(x.row, pk); if (v !== null) vals.push(v);
+    var fc = toNum(x.row.fc); if (fc !== null) fcs.push(fc);
+    work += f.mode === "distance" ? parseTm(x.row.tm) || 0 : ef;
+  });
+  return { f: f, pk: pk, vals: vals, fcs: fcs, workSec: work, sig: fmtSig(ci.sport, f) };
+}
+function avg(a) { return a.length ? a.reduce(function (x, y) { return x + y; }, 0) / a.length : null; }
+function dropOf(vals) {
+  if (vals.length < 2) return null;
+  var k = vals.length >= 6 ? 3 : Math.floor(vals.length / 2), a = avg(vals.slice(0, k)), b = avg(vals.slice(-k));
+  return { k: k, first: a, last: b, pct: (b - a) / a * 100 };
+}
+function prevSameFmt(s, sig) {
+  var list = valuesOf(D.seances).filter(function (x) { return x.date < s.date && x.reps; }).sort(byDateDesc);
+  for (var i = 0; i < list.length; i++) {
+    var ci = cardioInfo(list[i]); if (!ci || ci.legacy || ci.ctype !== "fractionne") continue;
+    var fd = fracData(list[i], ci); if (fd.sig === sig && fd.vals.length) return { s: list[i], fd: fd };
+  }
+  return null;
+}
+function repPace(sport, mode, pk, f, v) {
+  var ef = toNum(f.effort); if (v === null || !ef) return "";
+  if (mode === "temps") { if (pk !== "d" || !v) return ""; return sport === "natation" ? fmtTm(ef / (v / 100)) + " /100 m" : paceKm(ef / (v / 1000)); }
+  if (sport === "velo") return fmt(ef / 1000 / (v / 3600), 1) + " km/h";
+  return sport === "natation" ? fmtTm(v / (ef / 100)) + " /100 m" : paceKm(v / (ef / 1000));
+}
+/* ---------- Saisie ---------- */
+function cardioSheet(date, s) {
+  var id = seanceId(date, s.type), st = s.arret && s.arret.motif ? '<span class="state warn">Terminée plus tôt</span>' : hasData(s) ? '<span class="state done">Notée</span>' : '<span class="state alt">À noter</span>';
+  var ci = cardioInfo(s);
+  var h = '<section class="sheet" id="c-' + esc(s.type) + '"><div class="sheet-head"><div class="titled"><h2>' + esc(listLabel(SPORTS, ci.sport)) + '</h2><span class="small muted">' + esc(listLabel(CTYPES, ci.ctype)) + "</span></div>" + st + "</div>";
+  h += '<div><button type="button" class="linkbtn" data-act="cardioedit" data-id="' + esc(id) + '">Modifier la discipline ou le type</button></div>';
+  return h + cardioBody(date, s, id, ci) + "</section>";
+}
+function kvRows(rows) { return '<dl class="kv">' + rows.map(function (r) { return "<dt>" + esc(r[0]) + "</dt><dd>" + esc(r[1]) + "</dd>"; }).join("") + "</dl>"; }
+function consigneHtml(s, ci, f) {
+  var b = fcBands(), t = ci.ctype, rows = [], foot = "";
+  if (t === "recup") { if (b) rows.push(["FC", "moins de " + b.recupHi + " bpm"]); rows.push(["Ressenti", "1 à 2 sur 10"], ["Repère", "très facile, respiration calme"]); }
+  else if (t === "ef") { if (b) rows.push(["FC", b.efLo + " à " + b.efHi + " bpm, sans dépasser " + b.efHi]); rows.push(["Ressenti", "3 à 4 sur 10"], ["Repère", "tu peux parler en phrases complètes"]); }
+  else if (t === "fractionne") {
+    rows.push(["Ressenti", "7 à 9 sur 10"], ["Repère", "difficile mais régulier, tenable jusqu'à la dernière répétition"]);
+    var pk = primKey(ci.sport, f.mode, s), what = pk === "tm" ? "Temps" : pk === "d" ? "Distance" : pk === "p" ? "Puissance" : "Vitesse";
+    if (f.viseTxt) rows.push([what + " visé" + (pk === "d" || pk === "p" || pk === "v" ? "e" : ""), f.viseTxt + " par répétition"]);
+    else if (f.vise !== undefined && f.vise !== "" && (pk === "tm" ? parseTm(f.vise) : toNum(f.vise)) !== null) rows.push([what + " visé" + (pk === "tm" ? "" : "e"), fmtVal(pk === "tm" ? parseTm(f.vise) : toNum(f.vise), pk) + " par répétition"]);
+    else { var pv = prevSameFmt(s, fmtSig(ci.sport, f)); if (pv) foot = "Ta dernière séance du même format (" + fmtShort(pv.s.date) + ") : " + fmtVal(avg(pv.fd.vals), pk) + " en moyenne par répétition. ";
+    }
+    var short = f.mode === "temps" ? toNum(f.effort) && toNum(f.effort) <= 60 : parseTm(f.vise) && parseTm(f.vise) <= 60;
+    if (short) foot += "La FC met une à deux minutes à suivre l'effort : sur des répétitions courtes, compare surtout les " + (pk === "tm" ? "temps" : pk === "d" ? "distances" : "valeurs") + ".";
+  } else return '<p class="small muted">Sortie libre : pas de consigne de FC. Note la durée, la distance et ton ressenti.</p>';
+  var h = '<div class="target"><h3>Ta consigne</h3>' + kvRows(rows);
+  if (t !== "fractionne") h += '<p class="tiny muted">' + (b ? esc(bandsNote(b)) : 'Indique ton âge ou ta FC max dans Réglages pour avoir une fourchette de FC. En attendant, fie-toi au ressenti et au test de la parole.') + "</p>";
+  if (foot) h += '<p class="tiny muted">' + esc(foot) + "</p>";
+  if (!b && t !== "fractionne") h += '<div><button type="button" class="btn small" data-act="view" data-v="reglages">Compléter mon profil</button></div>';
+  return h + "</div>";
+}
+function sportNote(sport) {
+  if (sport === "velo") return "À vélo, la FC est souvent un peu plus basse qu'en course pour un même effort : garde aussi un œil sur le ressenti.";
+  if (sport === "natation") return "Dans l'eau, la FC mesurée au poignet est souvent moins fiable : elle reste facultative et le ressenti sert de repère principal.";
+  return "FC facultative : laisse vide si tu n'as ni montre ni ceinture.";
+}
+function cardioBody(date, s, id, ci) {
+  var h = "", f = effFmt(s, ci);
+  if (s.arret && s.arret.motif) h += '<div class="note warn"><b>Séance terminée plus tôt</b> (' + esc(motifLabel(MOTIFS_ARRET, s.arret.motif)) + ").</div>";
+  if (ci.prog && !ci.fr) {
+    h += '<div class="scale"><div class="scale-q"><span>Type de séance</span></div>' + seg("seances", id, "ctype", CTYPES.map(function (c) { return { v: c.v, l: c.l }; }), s.ctype) + "</div>";
+    if (!s.ctype) return h + '<p class="small muted">Choisis le type de séance pour afficher la saisie.</p>';
+  }
+  h += consigneHtml(s, ci, f);
+  if (ci.ctype === "fractionne") h += fracInputs(s, id, ci, f);
+  else h += globalInputs(s, id, ci);
+  h += '<div class="hr"></div>' + arretBlock(s, id) + bilan(s, id, true, { charge: true });
+  return h;
+}
+function globalInputs(s, id, ci) {
+  var sp = ci.sport, h = '<div class="hr"></div><div class="section"><h3>Ta séance</h3>';
+  if (sp === "natation") {
+    h += '<div class="grid2"><label class="field"><span>Distance (m)</span>' + inp("seances", id, "distance", s.distance, 'inputmode="numeric"') + '</label><label class="field"><span>Durée (min)</span>' + inp("seances", id, "duree", s.duree, 'inputmode="numeric"') + "</label></div>";
+    h += '<div class="scale"><div class="scale-q"><span>Nage principale</span></div>' + seg("seances", id, "nage", NAGES, s.nage) + "</div>";
+  } else {
+    h += '<div class="grid3"><label class="field"><span>Durée (min)</span>' + inp("seances", id, "duree", s.duree, 'inputmode="numeric"') + '</label><label class="field"><span>Distance (km)</span>' + inp("seances", id, "distance", s.distance, 'inputmode="decimal"') + '</label><label class="field"><span>Dénivelé (m)</span>' + inp("seances", id, "deniv", s.deniv, 'inputmode="numeric" placeholder="facult."') + "</label></div>";
+  }
+  h += '<div class="' + (sp === "velo" ? "grid3" : "grid2") + '">' + (sp === "velo" ? '<label class="field"><span>Puissance (W)</span>' + inp("seances", id, "puiss", s.puiss, 'inputmode="numeric" placeholder="facult."') + "</label>" : "") +
+    '<label class="field"><span>FC moy.' + (sp === "velo" ? "" : " (bpm)") + "</span>" + inp("seances", id, "fcMoy", s.fcMoy, 'inputmode="numeric"') + '</label><label class="field"><span>FC max' + (sp === "velo" ? "" : " (bpm)") + "</span>" + inp("seances", id, "fcMax", s.fcMax, 'inputmode="numeric"') + "</label></div>";
+  h += '<p class="tiny muted">' + esc(sportNote(sp)) + "</p>";
+  h += '<div data-live="' + esc(id) + '" data-kind="stats">' + liveStats(s, ci) + "</div>";
+  return h + "</div>";
+}
+function liveStats(s, ci) {
+  var sp = ci.sport, dur = toNum(s.duree), dist = toNum(s.distance), h = "";
+  if (dur && dist) {
+    if (sp === "natation") h += '<div class="stats"><div class="stat"><b>' + fmtTm(dur * 60 / (dist / 100)) + ' /100 m</b><span>allure moyenne</span></div></div>';
+    else { var kmh = dist / (dur / 60); h += '<div class="stats">' + (sp === "course" ? '<div class="stat"><b>' + paceKm(3600 / kmh) + '</b><span>allure moyenne</span></div>' : "") + '<div class="stat"><b>' + fmt(kmh, 1) + ' km/h</b><span>vitesse' + (sp === "course" ? "" : " moyenne") + "</span></div></div>"; }
+  }
+  var fc = toNum(s.fcMoy), b = fcBands();
+  if (fc && b && (ci.ctype === "ef" || ci.ctype === "recup")) {
+    var hi = ci.ctype === "ef" ? b.efHi : b.recupHi;
+    h += fc > hi ? '<div class="note warn"><b>FC moyenne au-dessus de ta fourchette</b> (' + fmt(fc, 0) + " bpm pour " + hi + " au plus) : séance plus intense que prévu.</div>"
+      : '<div class="note ok"><b>FC moyenne dans ta fourchette</b> (' + fmt(fc, 0) + " bpm).</div>";
+  }
+  return h;
+}
+function fracInputs(s, id, ci, f) {
+  var sp = ci.sport, u = s.fmt || {}, p = ci.fr || {}, h = '<div class="section"><h3>Format</h3><div class="format">';
+  function ph(k) { return p[k] !== undefined && p[k] !== "" ? ' placeholder="' + esc(String(p[k]).replace(".", ",")) + '"' : ""; }
+  function fi(k, label, mode) { return '<label class="field"><span>' + esc(label) + "</span>" + inp("seances", id, "fmt." + k, u[k], 'inputmode="' + (mode || "numeric") + '"' + ph(k)) + "</label>"; }
+  h += '<div class="scale"><div class="scale-q"><span>Effort mesuré</span></div><div class="seg" role="group">' + [{ v: "temps", l: "En temps" }, { v: "distance", l: "En distance" }].map(function (o) {
+    return '<button type="button" data-act="fmtmode" data-id="' + esc(id) + '" data-v="' + o.v + '" aria-pressed="' + (f.mode === o.v) + '">' + o.l + "</button>"; }).join("") + "</div></div>";
+  h += '<div class="grid2">' + fi("effort", f.mode === "distance" ? "Effort (m)" : "Effort (s)") + fi("recup", "Récupération (s)") + "</div>";
+  h += '<div class="grid3">' + fi("reps", "Répétitions") + fi("series", "Séries") + fi("entre", "Entre séries (min)", "decimal") + "</div>";
+  h += '<div class="grid2">' + fi("echauf", "Échauffement (min)") + fi("calme", "Retour au calme (min)") + "</div>";
+  var pk = primKey(sp, f.mode, s);
+  var vl = pk === "tm" ? "Temps visé (min:s)" : pk === "d" ? "Distance visée (m)" : pk === "p" ? "Puissance visée (W)" : "Vitesse visée (km/h)";
+  h += '<label class="field"><span>' + esc(vl) + ", facultatif</span>" + inp("seances", id, "fmt.vise", u.vise, 'inputmode="' + (pk === "tm" ? "text" : "decimal") + '"' + (p.vise !== undefined ? ' placeholder="' + esc(String(p.vise).replace(".", ",")) + '"' : "")) + "</label>";
+  var line = fmtLine(f);
+  if (line) h += '<p class="line">' + esc(line) + "</p>";
+  if (ci.fr) h += '<p class="tiny muted">Rempli d\'après ton programme (en pointillé). Ne saisis que ce que tu as fait autrement.</p>';
+  h += "</div></div>";
+  if (sp === "velo" && f.mode === "temps") h += '<div class="scale"><div class="scale-q"><span>Mesure à chaque répétition</span></div>' + seg("seances", id, "velMes", [{ v: "p", l: "Puissance" }, { v: "v", l: "Vitesse" }], s.velMes || "p") + "</div>";
+  h += '<div class="section"><h3>Répétitions</h3>';
+  var nRep = toNum(f.reps), nSer = Math.max(toNum(f.series) || 1, keysOf(s.reps).length ? Math.max.apply(null, keysOf(s.reps).map(Number)) + 1 : 0, toNum(s.nSer) || 0);
+  if (!nRep && !keysOf(s.reps).length) return h + '<p class="small muted">Indique le nombre de répétitions et l\'effort pour afficher les lignes.</p></div>' + fracTotals(s, id, f);
+  h += '<p class="small muted">Les chiffres en pointillé ne sont qu\'une proposition : une répétition ne compte que si tu la saisis.' + (pk === "tm" ? " Temps en minutes et secondes, par exemple 1:52." : "") + " FC facultative.</p>";
+  var head = pk === "tm" ? "Temps" : pk === "d" ? "Distance (m)" : pk === "p" ? "Puissance (W)" : "Vitesse (km/h)";
+  var prevV = null, prevFc = null, viseV = pk === "tm" ? parseTm(f.vise) : toNum(f.vise);
+  for (var i = 0; i < nSer; i++) {
+    var srows = (s.reps && s.reps[i]) || {}, n = Math.max(nRep || 0, keysOf(srows).length ? Math.max.apply(null, keysOf(srows).map(Number)) + 1 : 0, toNum((s.nRep || {})[i]) || 0) || 1;
+    var sv = []; keysOf(srows).forEach(function (j) { var v = primVal(srows[j], pk); if (v !== null) sv.push(v); });
+    h += '<div class="serie"><div class="serie-title"><h3>Série ' + (i + 1) + '</h3><span class="small muted">' + (sv.length ? "moyenne " + esc(fmtVal(avg(sv), pk)) : n + " répétition" + (n > 1 ? "s" : "")) + "</span></div>";
+    h += '<div class="rep-head"><span></span><span>' + esc(head) + "</span><span>FC fin (bpm)</span><span>" + (pk === "p" || pk === "v" ? "" : "Allure") + "</span></div>";
+    for (var j = 0; j < n; j++) {
+      var row = srows[j] || {}, v = primVal(row, pk), phv = prevV !== null ? prevV : viseV, b = "reps." + i + "." + j + ".";
+      h += '<div class="rep"><span class="i">' + (j + 1) + "</span>" +
+        inp("seances", id, b + pk, row[pk], 'inputmode="' + (pk === "tm" ? "text" : pk === "v" ? "decimal" : "numeric") + '" aria-label="Série ' + (i + 1) + ", répétition " + (j + 1) + ", " + esc(head.toLowerCase()) + '" placeholder="' + esc(phv !== null ? (pk === "tm" ? fmtTm(phv) : String(phv).replace(".", ",")) : "") + '"') +
+        inp("seances", id, b + "fc", row.fc, 'inputmode="numeric" aria-label="Série ' + (i + 1) + ", répétition " + (j + 1) + ', FC en fin de répétition" placeholder="' + (prevFc !== null ? prevFc : "facult.") + '"') +
+        '<span class="pace" data-live="' + esc(id) + '" data-kind="pace" data-r="' + i + "." + j + '">' + esc(repPace(sp, f.mode, pk, f, v)) + "</span></div>";
+      if (v !== null) prevV = v;
+      if (toNum(row.fc) !== null) prevFc = toNum(row.fc);
+    }
+    h += '<div><button type="button" class="btn small quiet" data-act="addrep" data-id="' + esc(id) + '" data-i="' + i + '" data-n="' + (n + 1) + '">Ajouter une répétition</button></div></div>';
+  }
+  h += '<div><button type="button" class="btn small quiet" data-act="addser" data-id="' + esc(id) + '" data-n="' + (nSer + 1) + '">Ajouter une série</button></div></div>';
+  h += '<div class="hr"></div><div class="section"><h3>Début et fin de séance</h3><div data-live="' + esc(id) + '" data-kind="sum">' + liveSum(s, ci) + "</div></div>";
+  return h + fracTotals(s, id, f);
+}
+function fracTotals(s, id, f) {
+  var est = fmtMinutes(f);
+  return '<div class="grid2"><label class="field"><span>Durée totale (min)</span>' + inp("seances", id, "duree", s.duree, 'inputmode="numeric"' + (est ? ' placeholder="' + est + '"' : "")) + '</label><label class="field"><span>Distance totale (km)</span>' + inp("seances", id, "distTot", s.distTot, 'inputmode="decimal" placeholder="facult."') + "</label></div>" +
+    '<p class="tiny muted">' + (est ? "Durée estimée d'après le format, en pointillé : saisis la durée réelle pour qu'elle compte dans la charge. " : "") + "Distance totale : échauffement et récupérations compris.</p>";
+}
+function liveSum(s, ci) {
+  var fd = fracData(s, ci), vals = fd.vals, pk = fd.pk, dr = dropOf(vals);
+  if (vals.length < 2) return '<p class="small muted">Le résumé apparaît dès 2 répétitions saisies.</p>';
+  var up = pk === "tm" ? "plus lent" : "hausse", down = pk === "tm" ? "plus rapide" : "baisse";
+  var word = dr.pct > 0 ? up : dr.pct < 0 ? down : "écart";
+  var kl = dr.k === 1 ? "1re" : dr.k + " premières", kr = dr.k === 1 ? "dernière" : dr.k + " dernières";
+  var h = '<div class="compare"><div><b>' + esc(fmtVal(dr.first, pk)) + "</b><span>" + kl + '</span></div><div><b>' + esc(fmtVal(dr.last, pk)) + "</b><span>" + kr + '</span></div><div><b>' + esc(signed(dr.pct, 0)) + " %</b><span>" + word + "</span></div></div>";
+  h += repChart(s, ci, fd);
+  var tot = pk === "d" ? ", " + fmt(vals.reduce(function (a, b) { return a + b; }, 0), 0) + " m en tout" : "";
+  h += '<p class="small">Moyenne : <b>' + esc(fmtVal(avg(vals), pk)) + "</b> par répétition sur " + vals.length + " répétition" + (vals.length > 1 ? "s" : "") + tot + ".";
+  var pv = prevSameFmt(s, fd.sig);
+  if (pv) { var pd = dropOf(pv.fd.vals); h += " Dernière séance du même format (" + esc(fmtShort(pv.s.date)) + ") : " + esc(fmtVal(avg(pv.fd.vals), pk)) + (pd ? ", " + (pd.pct > 0 ? up : down) + " de " + fmt(Math.abs(pd.pct), 0) + " %" : "") + "."; }
+  h += "</p>";
+  if (fd.fcs.length >= 2) h += '<p class="small muted">FC de fin de répétition : de ' + fmt(fd.fcs[0], 0) + " à " + fmt(fd.fcs[fd.fcs.length - 1], 0) + " bpm au fil de la séance.</p>";
+  return h;
+}
+function repChart(s, ci, fd) {
+  var pk = fd.pk, items = [];
+  repList(s).forEach(function (x) { var v = primVal(x.row, pk); if (v !== null) items.push({ i: x.i, v: v }); });
+  if (items.length < 2) return "";
+  var W = 600, H = 170, L = 44, R = 8, T = 10, B = 26, gap = 14, nSer = 0, last = -1;
+  items.forEach(function (it) { if (it.i !== last) { nSer++; last = it.i; } });
+  var lo = Math.min.apply(null, items.map(function (x) { return x.v; })), hi = Math.max.apply(null, items.map(function (x) { return x.v; }));
+  var padv = Math.max((hi - lo) * 0.25, hi * 0.03, 1), y0 = Math.max(0, lo - padv), y1 = hi + padv * 0.4;
+  var bw = (W - L - R - gap * (nSer - 1)) / items.length;
+  function Y(v) { return T + (1 - (v - y0) / (y1 - y0)) * (H - T - B); }
+  var g = "", step = niceStep((y1 - y0) / 3);
+  for (var v = Math.ceil(y0 / step) * step; v <= y1; v += step) g += '<line class="grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(v).toFixed(1) + '" y2="' + Y(v).toFixed(1) + '"/><text class="lbl" x="' + (L - 6) + '" y="' + (Y(v) + 4).toFixed(1) + '" text-anchor="end">' + esc(pk === "tm" ? fmtTm(v) : fmt(v, 0)) + "</text>";
+  var x = L, cur = items[0].i, start = L, labels = [];
+  items.forEach(function (it, k) {
+    if (it.i !== cur) { labels.push({ x: (start + x) / 2, i: cur }); x += gap; start = x; cur = it.i; }
+    g += '<rect class="bar-rep" x="' + (x + 1.5).toFixed(1) + '" y="' + Y(it.v).toFixed(1) + '" width="' + Math.max(1, bw - 3).toFixed(1) + '" height="' + (H - B - Y(it.v)).toFixed(1) + '" rx="2"><title>' + esc("Série " + (it.i + 1) + " : " + fmtVal(it.v, pk)) + "</title></rect>";
+    x += bw;
+  });
+  labels.push({ x: (start + x) / 2, i: cur });
+  if (labels.length > 1) labels.forEach(function (l) { g += '<text class="lbl" x="' + l.x.toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle">Série ' + (l.i + 1) + "</text>"; });
+  return '<svg class="chart" viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="' + esc("Valeur de chaque répétition, de " + fmtVal(items[0].v, pk) + " à " + fmtVal(items[items.length - 1].v, pk)) + '">' + g + "</svg>";
+}
+function chargeLine(s) {
+  var d = toNum(s.duree), r = toNum((s.bilan || {}).rpe);
+  return d && r ? '<p class="calc-out">Charge de la séance : <b>' + fmt(d, 0) + " min × " + fmt(r, 0) + " = " + fmt(d * r, 0) + "</b></p>" : '<p class="small muted">Note la durée et la difficulté pour calculer la charge de la séance.</p>';
+}
+function liveUpdate(id) {
+  var s = D.seances[id]; if (!s) return;
+  var ci = cardioInfo(s);
+  Array.prototype.forEach.call(app.querySelectorAll("[data-live]"), function (el) {
+    if (el.dataset.live !== id) return;
+    var k = el.dataset.kind;
+    if (k === "charge") el.innerHTML = chargeLine(s);
+    else if (ci && k === "stats") el.innerHTML = liveStats(s, ci);
+    else if (ci && k === "sum") el.innerHTML = liveSum(s, ci);
+    else if (ci && k === "pace") {
+      var f = effFmt(s, ci), pk = primKey(ci.sport, f.mode, s), ij = el.dataset.r.split("."), row = s.reps && s.reps[ij[0]] ? s.reps[ij[0]][ij[1]] : null;
+      el.textContent = repPace(ci.sport, f.mode, pk, f, primVal(row, pk));
+    }
+  });
+}
+/* Ajout ou modification d'une activité : discipline puis type */
+function cardioDialog(date, id) {
+  var cur = id ? D.seances[id] : null, st = { sport: cur ? cur.sport : (sportsOn()[0] || SPORTS[0]).v };
+  function draw() {
+    var b = fcBands(), sports = sportsOn().slice();
+    if (cur && !sports.some(function (x) { return x.v === cur.sport; })) sports.push(SPORTS.filter(function (x) { return x.v === cur.sport; })[0]);
+    var h = '<h2 id="dlg-t">' + (cur ? "Modifier l'activité" : "Nouvelle activité") + '</h2><p class="small muted">Choisis la discipline, puis le type de séance.</p>';
+    h += '<div class="scale"><div class="scale-q"><span>Discipline</span></div><div class="seg" role="group">' + sports.map(function (o) { return '<button type="button" data-sh="sport" data-v="' + o.v + '" aria-pressed="' + (st.sport === o.v) + '">' + esc(o.l) + "</button>"; }).join("") + "</div></div>";
+    h += '<div class="scale"><div class="scale-q"><span>Type de séance</span></div><div class="types">';
+    CTYPES.forEach(function (c) {
+      var hint = c.v === "recup" ? (b ? "FC conseillée : moins de " + b.recupHi + " bpm · " : "") + "ressenti 1 à 2" : c.v === "ef" ? (b ? "FC conseillée : " + b.efLo + " à " + b.efHi + " bpm · " : "") + "ressenti 3 à 4" : c.v === "fractionne" ? "ressenti 7 à 9" : "pas de consigne de FC";
+      h += '<button type="button" class="type" data-sh="type" data-v="' + c.v + '"' + (cur && cur.ctype === c.v && cur.sport === st.sport ? ' aria-pressed="true"' : "") + "><b>" + esc(c.l) + "</b><span>" + esc(c.d) + '</span><span class="hint">' + esc(hint) + "</span></button>";
+    });
+    h += "</div></div>";
+    if (!b) h += '<p class="small muted">Indique ton âge ou ta FC max dans Réglages pour avoir des fourchettes de FC.</p>';
+    h += '<div class="row"><button type="button" class="btn quiet" data-sh="cancel">Annuler</button>' + (cur ? '<button type="button" class="btn small quiet danger" data-sh="del">Supprimer cette activité</button>' : "") + "</div>";
+    return h;
+  }
+  function del() { delete D.seances[id]; persist(); render(); toast("Activité supprimée."); }
+  openSheet(draw(), function (b, close, back) {
+    var a = b.dataset.sh;
+    if (a === "sport") { st.sport = b.dataset.v; back.querySelector(".dialog").innerHTML = draw(); var again = back.querySelector('[data-sh="sport"][data-v="' + st.sport + '"]'); if (again) again.focus(); }
+    else if (a === "cancel") close();
+    else if (a === "type") {
+      close();
+      var s = cur;
+      if (!s) {
+        var n = 1; cardioOf(date).forEach(function (x) { n = Math.max(n, Number(x.type.slice(6)) + 1); });
+        s = seance(date, "CARDIO" + n, true); s.cardio = 1;
+      }
+      s.sport = st.sport; s.ctype = b.dataset.v; persist(); render();
+      var el = document.getElementById("c-" + s.type); if (el) el.scrollIntoView({ block: "start" });
+    } else if (a === "del") {
+      close();
+      if (hasData(cur)) dialog("Supprimer cette activité ?", '<p class="small">Les données notées pour cette activité seront effacées.</p>', [{ label: "Supprimer", cls: "danger", run: del }, { label: "Annuler", cls: "primary" }]);
+      else del();
+    }
+  }, true);
+}
+/* ---------- Charge, zones, repère OMS ---------- */
+function sessLoad(s) { var d = toNum(s.duree), r = toNum((s.bilan || {}).rpe); return d && r ? d * r : null; }
+function loadCat(s) {
+  var ci = cardioInfo(s); if (ci) return ci.sport;
+  if (s.type === LIBRE) return "muscu";
+  var def = defOf(s); if (!def) return null;
+  return def.kind === "muscu" ? "muscu" : def.kind === "sport" ? "sport" : null;
+}
+function catLabel(c) {
+  if (c === "muscu") return "Musculation";
+  if (c === "sport") { var n = null; valuesOf(D.programmes).forEach(function (p) { keysOf(p.sessions).forEach(function (k) { if (p.sessions[k].kind === "sport" && !n) n = p.sessions[k].name; }); }); return n || "Sport"; }
+  return listLabel(SPORTS, c);
+}
+var CAT_LOAD_ORDER = ["muscu", "sport", "course", "velo", "natation"];
+function inRange(from, to) { return valuesOf(D.seances).filter(function (s) { return s.date >= from && s.date <= to && hasData(s); }); }
+function weekCharge(from, to) {
+  var by = {}, tot = 0, miss = 0;
+  inRange(from, to).forEach(function (s) {
+    var c = loadCat(s); if (!c) return;
+    var e = by[c] || (by[c] = { load: 0, n: 0, nTot: 0, min: 0 }), L = sessLoad(s);
+    e.nTot++;
+    var z = cardioZones(s); if (z) e.min += z.dur;
+    if (L) { e.load += L; e.n++; tot += L; } else miss++;
+  });
+  return { by: by, total: tot, miss: miss };
+}
+function cardioZones(s) {
+  var ci = cardioInfo(s); if (!ci || ci.test) return null;
+  var dur = toNum(s.duree) || 0, z = { sport: ci.sport, dur: dur, basse: 0, seuil: 0, haute: 0, nr: 0 };
+  if (ci.legacy) { z.nr = dur; return z; }
+  if (ci.ctype === "recup" || ci.ctype === "ef") z.basse = dur;
+  else if (ci.ctype === "fractionne") { var hh = fracData(s, ci).workSec / 60; z.haute = hh; z.basse = Math.max(0, dur - hh); z.dur = Math.max(dur, hh); }
+  else {
+    var fc = toNum(s.fcMoy), mx = fcMaxInfo(), r = toNum((s.bilan || {}).rpe), lvl = null;
+    if (fc && mx) lvl = fc < mx.v * 0.82 ? "basse" : fc <= mx.v * 0.87 ? "seuil" : "haute";
+    else if (r) lvl = r <= 4 ? "basse" : r <= 6 ? "seuil" : "haute";
+    if (lvl) z[lvl] = dur; else z.nr = dur;
+  }
+  return z;
+}
+function weekZones(from, to) {
+  var z = { basse: 0, seuil: 0, haute: 0, nr: 0, dur: 0 };
+  inRange(from, to).forEach(function (s) { var x = cardioZones(s); if (x) ["basse", "seuil", "haute", "nr", "dur"].forEach(function (k) { z[k] += x[k]; }); });
+  return z;
+}
+function weekOms(from, to) {
+  var mod = 0, vig = 0, renfo = {};
+  inRange(from, to).forEach(function (s) {
+    var ci = cardioInfo(s), r = toNum((s.bilan || {}).rpe), d = toNum(s.duree), c = loadCat(s);
+    if (ci) { if (!d) { var z = cardioZones(s); if (z && z.haute) vig += z.haute; return; } if (ci.legacy ? r >= 7 : ci.ctype === "fractionne" || (ci.ctype === "libre" && r >= 7)) vig += d; else mod += d; }
+    else if (c === "sport") { if (d) { if (r >= 7) vig += d; else mod += d; } }
+    else if (c === "muscu") renfo[s.date] = true;
+    if (s.footing && toNum(s.footing)) mod += toNum(s.footing);
+  });
+  return { mod: mod, vig: vig, eq: mod + 2 * vig, renfo: keysOf(renfo).length };
+}
+function chargeBar(label, val, mx, sub) {
+  return '<div class="vrow grp" role="img" aria-label="' + esc(label + " : charge " + fmt(val, 0)) + '"><span class="m">' + esc(label) + '</span><span class="track">' + (val ? '<span class="done" data-w="' + (val / mx * 100).toFixed(1) + '"></span>' : "") + '</span><span class="v"><b>' + fmt(val, 0) + "</b></span></div>" + (sub ? '<p class="vsub">' + esc(sub) + "</p>" : "");
+}
+function weekCardioSheets(mon) {
+  var sun = addDays(mon, 6), wc = weekCharge(mon, sun), prev = weekCharge(addDays(mon, -7), addDays(mon, -1)), h = "";
+  var cats = CAT_LOAD_ORDER.filter(function (c) { return wc.by[c]; });
+  h += '<section class="sheet"><div class="titled"><h2>Charge de la semaine</h2><p class="small muted">Durée × difficulté, additionnée sur toutes les activités.</p></div>';
+  if (!cats.length) h += '<p class="small muted">Rien de noté cette semaine. La charge se calcule avec la durée et la difficulté de chaque séance.</p>';
+  else {
+    h += '<div class="kpis two"><div class="kpi"><b>' + fmt(wc.total, 0) + '</b><span>cette semaine</span></div><div class="kpi"><b>' + (prev.total ? fmt(prev.total, 0) : "–") + "</b><span>semaine précédente</span></div></div>";
+    var mx = Math.max.apply(null, cats.map(function (c) { return wc.by[c].load; }).concat([1])) * 1.1, vh = '<div class="vol">';
+    cats.forEach(function (c) {
+      var e = wc.by[c], sub = (e.n === e.nTot ? e.n + " séance" + (e.n > 1 ? "s" : "") : e.n + " séance" + (e.n > 1 ? "s" : "") + " comptée" + (e.n > 1 ? "s" : "") + " sur " + e.nTot) + (e.min ? " · " + fmtDur(e.min) : "");
+      vh += chargeBar(catLabel(c), e.load, mx, sub);
+    });
+    h += vh + "</div>";
+    if (wc.miss) h += '<p class="small muted">' + wc.miss + " séance" + (wc.miss > 1 ? "s" : "") + " sans durée ou sans difficulté : non comptée" + (wc.miss > 1 ? "s" : "") + ". Tu peux les compléter dans la séance.</p>";
+  }
+  h += '<details class="calc"><summary class="small">Comment c\'est calculé</summary><ul class="small"><li>Charge d\'une séance : sa durée en minutes × sa difficulté de 1 à 10 (méthode de la séance-RPE, Foster, 2001). Elle permet d\'additionner musculation, sport et cardio sur une même échelle.</li><li>Seules les valeurs que tu as saisies comptent : une durée proposée en pointillé n\'est pas comptée.</li><li>Pour suivre l\'évolution, compare d\'une semaine à l\'autre plutôt que de viser un chiffre précis.</li></ul></details></section>';
+  var z = weekZones(mon, sun);
+  if (z.dur) {
+    var tot = z.basse + z.seuil + z.haute, m2 = Math.max(z.basse, z.seuil, z.haute, 1) * 1.1;
+    var zb = function (l, v, sub) { return '<div class="vrow grp" role="img" aria-label="' + esc(l + " : " + fmt(v, 0) + " minutes") + '"><span class="m">' + l + '</span><span class="track">' + (v ? '<span class="done" data-w="' + (v / m2 * 100).toFixed(1) + '"></span>' : "") + '</span><span class="v"><b>' + fmt(v, 0) + "</b> min</span></div>" + (sub ? '<p class="vsub">' + esc(sub) + "</p>" : ""); };
+    var pc = function (v) { return tot ? " · " + fmt(v / tot * 100, 0) + " %" : ""; };
+    h += '<section class="sheet"><div class="titled"><h2>Intensité en endurance</h2><p class="small muted">Temps des séances de course, vélo et natation, réparti selon leur type.</p></div><div class="vol">' +
+      zb("Basse", z.basse, "endurance, récupération, échauffements" + pc(z.basse)) + zb("Seuil", z.seuil, z.seuil ? "sorties libres soutenues" + pc(z.seuil) : "") + zb("Haute", z.haute, z.haute ? "répétitions du fractionné" + pc(z.haute) : "") + "</div>";
+    if (z.nr) h += '<p class="small muted">' + fmtDur(z.nr) + " non réparties (séances notées avant cette version ou sans repère d'intensité).</p>";
+    h += '<p class="small muted">Repère courant : la grande majorité du temps en zone basse, une petite part en zone haute.</p></section>';
+  }
+  if (!(D.vue && D.vue.oms === false)) {
+    var o = weekOms(mon, sun);
+    if (o.eq || o.renfo) {
+      var top = Math.max(450, o.eq * 1.05), ok = o.eq >= 150;
+      h += '<section class="sheet"><div class="titled"><h2>Repère OMS</h2><p class="small muted">Au moins 150 à 300 min d\'activité d\'endurance modérée par semaine. Une minute intense compte double.</p></div>' +
+        '<div class="gauge" role="img" aria-label="' + esc(fmt(o.eq, 0) + " minutes en équivalent modéré, repère de 150 à 300 minutes " + (ok ? "atteint" : "pas encore atteint")) + '"><span class="fillbar" data-w="' + (Math.min(o.eq, top) / top * 100).toFixed(1) + '"></span><span class="mark" data-l="' + (150 / top * 100).toFixed(1) + '"></span><span class="mark" data-l="' + (300 / top * 100).toFixed(1) + '"></span></div>' +
+        '<div class="gauge-scale"><span data-l="' + (150 / top * 100).toFixed(1) + '">150</span><span data-l="' + (300 / top * 100).toFixed(1) + '">300</span></div>' +
+        '<div class="note ' + (ok ? "ok" : "") + '"><b>' + fmt(o.eq, 0) + " min en équivalent modéré" + (ok ? " : repère atteint." : ".") + "</b> " + fmt(o.mod, 0) + " min modérées et " + fmt(o.vig, 0) + " min intenses.</div>" +
+        '<p class="small muted">Comptés : course, vélo, natation, ' + esc(catLabel("sport").toLowerCase()) + " et footing du jour de repos. Endurance et récupération = modérée ; fractionné et ressenti de 7 ou plus = intense. Renforcement musculaire : " + o.renfo + " jour" + (o.renfo > 1 ? "s" : "") + ", pour 2 recommandés.</p></section>";
+    }
+  }
+  return h;
+}
+/* ---------- Progrès : endurance ---------- */
+function enduranceSheets() {
+  var h = "", sigs = {};
+  valuesOf(D.seances).forEach(function (s) {
+    var ci = cardioInfo(s); if (!ci || ci.legacy || ci.ctype !== "fractionne") return;
+    var fd = fracData(s, ci); if (!fd.vals.length) return;
+    var e = sigs[fd.sig] || (sigs[fd.sig] = { sig: fd.sig, label: listLabel(SPORTS, ci.sport) + " · " + (fmtLine(fd.f) || "format libre"), pk: fd.pk, pts: [], last: "" });
+    e.pts.push({ x: s.date, y: avg(fd.vals), drop: dropOf(fd.vals) }); if (s.date > e.last) e.last = s.date;
+  });
+  var keys = keysOf(sigs).sort(function (a, b) { return sigs[a].last < sigs[b].last ? 1 : -1; });
+  h += '<section class="sheet"><div class="titled"><h2>Fractionné</h2><p class="small muted">Valeur moyenne par répétition, séance après séance, pour un même format.</p></div>';
+  if (!keys.length) h += '<p class="small muted">La courbe apparaît après ta première séance de fractionné notée.</p>';
+  else {
+    var sel = D.vue && sigs[D.vue.frac] ? D.vue.frac : keys[0], e = sigs[sel], pk = e.pk;
+    if (keys.length > 1) h += '<div class="seg chips" role="group">' + keys.map(function (k) { return '<button type="button" data-act="fracsel" data-k="' + esc(k) + '" aria-pressed="' + (k === sel) + '">' + esc(sigs[k].label) + "</button>"; }).join("") + "</div>";
+    else h += '<p class="small"><b>' + esc(e.label) + "</b></p>";
+    var pts = e.pts.sort(function (a, b) { return a.x < b.x ? -1 : 1; });
+    h += chart([{ pts: pts, cls: "s-plate", dots: true, line: true }], pk === "tm" ? { unit: "par répétition", minStep: 5, tick: function (v) { return fmtTm(v); } } : { unit: pk === "d" ? "m" : pk === "p" ? "W" : "km/h" });
+    h += '<div class="log">' + pts.slice().reverse().slice(0, 6).map(function (p) {
+      return '<div class="log-item"><div class="row"><b>' + esc(fmtShort(p.x)) + "</b><span>" + esc(fmtVal(p.y, pk)) + (p.drop ? " · " + (p.drop.pct > 0 ? (pk === "tm" ? "plus lent" : "hausse") : (pk === "tm" ? "plus rapide" : "baisse")) + " de " + fmt(Math.abs(p.drop.pct), 0) + " %" : "") + "</span></div></div>";
+    }).join("") + "</div>";
+    h += '<p class="small muted">Baisse ou hausse : écart entre les 3 premières et les 3 dernières répétitions. Une baisse qui diminue d\'une séance à l\'autre signale une meilleure tenue de l\'effort.</p>';
+  }
+  h += "</section>";
+  SPORTS.forEach(function (sp) {
+    var list = valuesOf(D.seances).filter(function (s) { var ci = cardioInfo(s); return ci && !ci.legacy && ci.sport === sp.v && (ci.ctype === "ef" || ci.ctype === "recup") && toNum(s.duree) && toNum(s.distance); }).sort(byDateDesc).slice(0, 6);
+    if (!list.length) return;
+    function spd(s) { var d = toNum(s.duree), x = toNum(s.distance); return sp.v === "natation" ? d * 60 / (x / 100) : sp.v === "course" ? d * 60 / x : x / (d / 60); }
+    function spdTxt(v) { return sp.v === "natation" ? fmtTm(v) + " /100 m" : sp.v === "course" ? paceKm(v) : fmt(v, 1) + " km/h"; }
+    h += '<section class="sheet"><div class="titled"><h2>Endurance fondamentale · ' + esc(sp.l.toLowerCase()) + '</h2><p class="small muted">' + (sp.v === "velo" ? "Vitesse" : "Allure") + " et FC moyenne des dernières séances faciles.</p></div><div class=\"log\">";
+    list.forEach(function (s) { h += '<div class="log-item"><div class="row"><b>' + esc(fmtShort(s.date)) + "</b><span>" + esc(spdTxt(spd(s)) + (toNum(s.fcMoy) ? " · " + fmt(toNum(s.fcMoy), 0) + " bpm" : "")) + "</span></div></div>"; });
+    h += "</div>";
+    var a = list[list.length - 1], b = list[0], fa = toNum(a.fcMoy), fb = toNum(b.fcMoy);
+    if (list.length >= 2 && fa && fb && Math.abs(fa - fb) <= 3) {
+      var va = spd(a), vb = spd(b), better = sp.v === "velo" ? vb > va : vb < va, diff = Math.abs(vb - va);
+      var dt = sp.v === "velo" ? fmt(diff, 1) + " km/h" : fmt(diff, 0) + (sp.v === "natation" ? " s/100 m" : " s/km");
+      if (diff >= (sp.v === "velo" ? 0.1 : 1)) h += '<div class="note ' + (better ? "ok" : "") + '"><b>À FC comparable (' + fmt(Math.min(fa, fb), 0) + " à " + fmt(Math.max(fa, fb), 0) + " bpm), tu " + (sp.v === "natation" ? "nages" : sp.v === "velo" ? "roules" : "cours") + " " + dt + " plus " + (better ? "vite" : "lentement") + "</b> que le " + esc(fmtShort(a.date)) + ".</div>";
+    }
+    h += "</section>";
+  });
+  var weeks = [], mon = mondayOfDate(todayStr());
+  for (var k = 7; k >= 0; k--) { var m = addDays(mon, -7 * k), wc = weekCharge(m, addDays(m, 6)); if (wc.total || weeks.length) weeks.push({ m: m, t: wc.total }); }
+  h += '<section class="sheet"><div class="titled"><h2>Charge par semaine</h2><p class="small muted">Toutes activités, durée × difficulté.</p></div>';
+  if (!weeks.some(function (x) { return x.t; })) h += '<p class="small muted">La charge apparaît quand une séance a une durée et une difficulté notées.</p>';
+  else { var mxw = Math.max.apply(null, weeks.map(function (x) { return x.t; })) * 1.1; h += '<div class="vol">' + weeks.map(function (x) { return chargeBar((blockWeek(x.m) ? "Semaine " + weekOf(x.m) : "Sem. du " + fmtShort(x.m).replace(/\.$/, "")), x.t, mxw, ""); }).join("") + "</div>"; }
+  return h + "</section>";
+}
+/* ---------- Réglages : profil cardio ---------- */
+function profilSheet() {
+  var p = D.profil || {}, b = fcBands(), mx = fcMaxInfo(), h = '<section class="sheet"><div class="titled"><h2>Profil cardio</h2><p class="small muted">Tout est facultatif. Ces réponses servent à te proposer une FC et un ressenti à respecter selon le type de séance.</p></div>';
+  h += '<div class="grid2"><label class="field"><span>Âge</span>' + inp("profil", "p", "age", p.age, 'inputmode="numeric"') + '</label><label class="field"><span>FC max mesurée</span>' + inp("profil", "p", "fcmax", p.fcmax, 'inputmode="numeric" placeholder="inconnue"') + "</label></div>";
+  h += '<div class="grid2"><label class="field"><span>FC au repos</span>' + inp("profil", "p", "fcrepos", p.fcrepos, 'inputmode="numeric" placeholder="facult."') + '</label><div class="field"><span>Sexe</span>' + seg("profil", "p", "sexe", [{ v: "H", l: "H" }, { v: "F", l: "F" }], p.sexe) + "</div></div>";
+  h += '<p class="tiny muted">FC au repos : à prendre le matin au réveil, allongé. FC max mesurée : le pic atteint à la fin d\'un effort maximal, par exemple un test ou une course à fond, lu sur une montre ou une ceinture.</p>';
+  h += '<div class="scale"><div class="scale-q"><span>Calcul des fourchettes</span></div>' + seg("profil", "p", "methode", [{ v: "pct", l: "% de la FC max" }, { v: "karvonen", l: "Réserve cardiaque" }], p.methode === "karvonen" ? "karvonen" : "pct") + '<p class="tiny muted">La réserve cardiaque (méthode de Karvonen) tient compte de ta FC au repos' + (p.methode === "karvonen" && !(b && b.karv) ? " : indique-la pour l'utiliser." : ".") + "</p></div>";
+  if (!mx) return h + '<p class="small muted">Indique ton âge ou ta FC max mesurée pour voir tes fourchettes.</p></section>';
+  h += '<div class="note info"><b>FC max utilisée : ' + mx.v + " bpm</b>" + (mx.est ? ", estimée d'après ton âge (" + (p.sexe === "F" ? "206 − 0,88 × " : "208 − 0,7 × ") + fmt(mx.age, 0) + "). L'estimation peut se tromper d'une dizaine de battements : une FC max mesurée la remplace." : ", mesurée.") + "</div>";
+  var pr = b.karv ? ["moins de 60 % de la réserve", "60 à 70 % de la réserve"] : ["moins de 70 % de la FC max", "70 à 80 % de la FC max"];
+  h += '<div class="section"><h3>Tes fourchettes</h3><div class="ztable">' +
+    '<div class="zrow"><b>Récupération active</b><span class="bpm">moins de ' + b.recupHi + ' bpm</span><span class="d">' + pr[0] + " · ressenti 1 à 2</span></div>" +
+    '<div class="zrow"><b>Endurance fondamentale</b><span class="bpm">' + b.efLo + " à " + b.efHi + ' bpm</span><span class="d">' + pr[1] + " · ressenti 3 à 4 · tu peux parler</span></div>" +
+    '<div class="zrow"><b>Fractionné</b><span class="bpm">pas de cible</span><span class="d">consigne en ressenti (7 à 9), puis en allure d\'après tes séances précédentes</span></div></div></div>';
+  return h + "</section>";
+}
+function sportsSheet() {
+  var on = sportsOn().map(function (s) { return s.v; }), oms = !(D.vue && D.vue.oms === false);
+  return '<section class="sheet"><h2>Disciplines</h2><p class="small muted">Disciplines proposées quand tu ajoutes une activité cardio.</p><div class="seg chips" role="group">' +
+    SPORTS.map(function (s) { return '<button type="button" data-act="sporttog" data-v="' + s.v + '" aria-pressed="' + (on.indexOf(s.v) >= 0) + '">' + esc(s.l) + "</button>"; }).join("") + "</div>" +
+    '<div class="scale"><div class="scale-q"><span>Repère OMS dans le bilan de la semaine</span></div><div class="seg" role="group"><button type="button" data-act="omstog" data-v="1" aria-pressed="' + oms + '">Affiché</button><button type="button" data-act="omstog" data-v="0" aria-pressed="' + !oms + '">Masqué</button></div></div></section>';
+}
+/* ---------- Texte pour Claude ---------- */
+function cardioSummary(s, ci) {
+  var out = [], sp = ci.sport;
+  if (ci.ctype === "fractionne") {
+    var fd = fracData(s, ci), f = fd.f, pk = fd.pk, line = fmtLine(f);
+    if (line) out.push("format " + line + (toNum(f.echauf) ? ", échauffement " + f.echauf + " min" : "") + (toNum(f.calme) ? ", retour au calme " + f.calme + " min" : ""));
+    var bySer = {};
+    repList(s).forEach(function (x) { if (!rowAny(x.row, pk)) return; var v = primVal(x.row, pk), fc = toNum(x.row.fc); (bySer[x.i] = bySer[x.i] || []).push((v !== null ? fmtVal(v, pk) : "?") + (fc !== null ? " (FC " + fc + ")" : "")); });
+    keysOf(bySer).forEach(function (i) { out.push("série " + (Number(i) + 1) + " : " + bySer[i].join(", ")); });
+    var dr = dropOf(fd.vals); if (dr) out.push("écart début/fin " + signed(dr.pct, 0) + " %");
+    if (toNum(s.distTot)) out.push("distance totale " + fmt(toNum(s.distTot), 2) + " km");
+  } else {
+    var dur = toNum(s.duree), dist = toNum(s.distance);
+    if (dur) out.push(dur + " min");
+    if (dist) out.push(sp === "natation" ? fmt(dist, 0) + " m" : fmt(dist, 2) + " km");
+    if (dur && dist) out.push(sp === "natation" ? fmtTm(dur * 60 / (dist / 100)) + "/100 m" : sp === "course" ? paceKm(dur * 60 / dist).replace(" /", "/") : fmt(dist / (dur / 60), 1) + " km/h");
+    if (toNum(s.deniv)) out.push("D+ " + s.deniv + " m");
+    if (toNum(s.puiss)) out.push(s.puiss + " W");
+    if (s.nage) out.push(s.nage.toLowerCase());
+  }
+  if (ci.ctype === "fractionne" && toNum(s.duree)) out.push(s.duree + " min au total");
+  if (toNum(s.fcMoy)) out.push("FC moy " + s.fcMoy);
+  if (toNum(s.fcMax)) out.push("FC max " + s.fcMax);
+  return out.join(", ");
+}
+function chargeText(mon) {
+  var sun = addDays(mon, 6), wc = weekCharge(mon, sun), z = weekZones(mon, sun);
+  var parts = CAT_LOAD_ORDER.filter(function (c) { return wc.by[c]; }).map(function (c) { return catLabel(c).toLowerCase() + " " + fmt(wc.by[c].load, 0); });
+  return (wc.total ? fmt(wc.total, 0) + " (" + parts.join(", ") + ")" + (wc.miss ? ", " + wc.miss + " séance(s) sans durée ou difficulté" : "") : "aucune") +
+    (z.dur ? ". Endurance : " + fmtDur(z.dur) + ", zone basse " + fmt(z.basse, 0) + " min, seuil " + fmt(z.seuil, 0) + " min, haute " + fmt(z.haute, 0) + " min" : "");
+}
+
 /* ---------- Semaine ---------- */
 function viewSemaine() {
   var mon = S.mon, sun = addDays(mon, 6), blk = blockWeek(mon), w = blk ? weekOf(mon) : null;
@@ -927,6 +1510,7 @@ function viewSemaine() {
       var types = plannedFor(d), lib = libreOf(d);
       var names = (types || []).map(function (t) { return isReplaced(d, t) ? "Séance libre" : shortName(t); });
       if (lib && !(types || []).some(function (t) { return isReplaced(d, t); })) names.push("Séance libre");
+      cardioOf(d).forEach(function (s) { names.push(cardioTitle(s)); });
       label = types === null ? "Selon l'organisation de la semaine" + (lib ? ", séance libre" : "") : names.length ? names.join(" et ") : "Rien de prévu";
     } else {
       var notees = valuesOf(D.seances).filter(function (s) { return s.date === d && hasData(s); }).map(sessionLabel);
@@ -936,6 +1520,7 @@ function viewSemaine() {
   }
   h += "</div></div>";
   h += weekVolSheet(mon);
+  h += weekCardioSheets(mon);
   h += '<section class="sheet"><h2>Bilan de la semaine</h2>';
   h += '<div class="scale"><div class="scale-q"><span>Fatigue générale</span><span class="ends">1 en forme, 10 épuisé</span></div>' + seg("semaines", id, "fatigue", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], wd.fatigue, true) + "</div>";
   h += '<label class="field"><span>Sommeil moyen par nuit (heures)</span>' + inp("semaines", id, "sommeil", wd.sommeil, 'inputmode="decimal" placeholder="ex. 7,5"') + "</label>";
@@ -948,7 +1533,12 @@ function countDone(from, to) { return valuesOf(D.seances).filter(function (s) { 
 
 /* ---------- Progrès ---------- */
 function viewProgres() {
-  var h = '<h1>Progrès</h1>';
+  var endu = D.vue && D.vue.prog === "endu";
+  var h = '<h1>Progrès</h1><div class="seg" role="group" aria-label="Type de progrès"><button type="button" data-act="progvue" data-v="force" aria-pressed="' + !endu + '">Force et poids</button><button type="button" data-act="progvue" data-v="endu" aria-pressed="' + endu + '">Endurance</button></div>';
+  if (endu) {
+    var lst = valuesOf(D.seances).filter(function (s) { return hasData(s) && cardioInfo(s); }).sort(byDateDesc).slice(0, 30);
+    return h + enduranceSheets() + '<section class="sheet"><h2>Séances d\'endurance notées</h2><div class="log">' + (lst.length ? lst.map(logItem).join("") : '<p class="small muted">Aucune séance de course, vélo ou natation notée pour l\'instant.</p>') + "</div></section>";
+  }
   var weights = valuesOf(D.pesees).filter(function (p) { return toNum(p.kg); }).map(function (p) { return { x: p.date, y: toNum(p.kg) }; }).sort(function (a, b) { return a.x < b.x ? -1 : 1; });
   var avgs = [];
   if (weights.length) for (var m = mondayOfDate(weights[0].x); m <= weights[weights.length - 1].x; m = addDays(m, 7)) { var a = weekAvg(m); if (a) avgs.push({ x: addDays(m, 3), y: a }); }
@@ -985,7 +1575,8 @@ function mensuSheet() {
   return h + '<p class="tiny muted">Mesure toujours le matin à jeun, avant l\'entraînement, au même endroit et de la même façon. Une courbe apparaît dès la deuxième mesure.</p></section>';
 }
 function logItem(s) {
-  var def = sessionDef(s.type), r = readiness(s.checkin), b = s.bilan || {}, chips = [], isLib = s.type === LIBRE;
+  var def = sessionDef(s.type), r = readiness(s.checkin), b = s.bilan || {}, chips = [], isLib = s.type === LIBRE, isC = isCardioType(s.type);
+  if (toNum(s.duree)) chips.push('<span class="state">' + esc(fmtDur(toNum(s.duree))) + "</span>");
   if (isLib) { chips.push('<span class="state alt">hors salle</span>'); var nx = (s.liste || []).length; if (nx) chips.push('<span class="state">' + nx + " exercice" + (nx > 1 ? "s" : "") + "</span>"); }
   if (r) chips.push('<span class="state ' + (r.level === "ok" ? "done" : "warn") + '">forme ' + fmt(r.avg, 1) + "</span>");
   if (b.rpe) chips.push('<span class="state">difficulté ' + b.rpe + "</span>");
@@ -993,7 +1584,7 @@ function logItem(s) {
   if (s.arret && s.arret.motif) chips.push('<span class="state warn">arrêtée, ' + esc(motifLabel(MOTIFS_ARRET, s.arret.motif)) + "</span>");
   if (s.mods && keysOf(s.mods).length) chips.push('<span class="state alt">' + keysOf(s.mods).length + " exercice" + (keysOf(s.mods).length > 1 ? "s" : "") + " changé" + (keysOf(s.mods).length > 1 ? "s" : "") + "</span>");
   var pains = b.douleurs ? keysOf(b.douleurs).filter(function (k) { return b.douleurs[k]; }) : [];
-  return '<button type="button" class="log-item linkless" data-act="goto" data-date="' + s.date + '"><div class="row"><b>' + esc(fmtShort(s.date)) + ", " + esc(isLib ? "Séance libre" : s.plan ? s.plan.short : def ? def.short || def.name : s.type) + '</b><span class="row">' + chips.join("") + "</span></div>" +
+  return '<button type="button" class="log-item linkless" data-act="goto" data-date="' + s.date + '"><div class="row"><b>' + esc(fmtShort(s.date)) + ", " + esc(isLib ? "Séance libre" : isC ? cardioTitle(s) : s.plan ? s.plan.short : def ? def.short || def.name : s.type) + '</b><span class="row">' + chips.join("") + "</span></div>" +
     (isLib ? '<span class="small muted">' + esc(libreSub(s)) + "</span>" : "") + (pains.length ? '<span class="pain">Douleurs : ' + esc(pains.map(function (k) { return labelZone(k); }).join(", ")) + "</span>" : "") + (b.note ? '<span class="small muted">' + esc(b.note) + "</span>" : "") + "</button>";
 }
 function labelZone(k) { for (var i = 0; i < DOULEURS.length; i++) if (zk(DOULEURS[i]) === k) return DOULEURS[i].toLowerCase(); return k; }
@@ -1208,7 +1799,7 @@ function chart(series, opt) {
   var span = diffDays(x1, x0) || 1;
   function X(x) { return L + diffDays(x, x0) / span * (W - L - R); }
   function Y(y) { return T + (1 - (y - y0) / (y1 - y0)) * (H - T - B); }
-  var g = "", step = niceStep((y1 - y0) / 4);
+  var g = "", step = Math.max(niceStep((y1 - y0) / 4), opt.minStep || 0);
   for (var v = Math.ceil(y0 / step) * step; v <= y1; v += step) g += '<line class="grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(v) + '" y2="' + Y(v) + '"/><text class="lbl" x="' + (L - 6) + '" y="' + (Y(v) + 4) + '" text-anchor="end">' + esc(tick(v)) + "</text>";
   if (P && x0 >= P.debut && x1 <= lastDay()) { for (var w = 1; w <= P.semaines; w++) { var d = mondayOf(w); if (d >= x0 && d <= x1) g += '<text class="lbl" x="' + X(d) + '" y="' + (H - 8) + '" text-anchor="middle">S' + w + "</text>"; } }
   else [x0, addDays(x0, Math.round(span / 2)), x1].forEach(function (d, k) { g += '<text class="lbl" x="' + X(d) + '" y="' + (H - 8) + '" text-anchor="' + (k === 0 ? "start" : k === 2 ? "end" : "middle") + '">' + esc(fmtShort(d)) + "</text>"; });
@@ -1230,6 +1821,8 @@ function viewReglages() {
   var others = keysOf(D.programmes).filter(function (k) { return !P || k !== P.id; });
   if (others.length) h += '<div class="scale"><div class="scale-q"><span>Autres programmes sur ce téléphone</span></div><div class="row">' + others.map(function (k) { return '<button type="button" class="btn small" data-act="switchprog" data-id="' + esc(k) + '">' + esc(D.programmes[k].titre || k) + "</button>"; }).join("") + "</div></div>";
   h += '<label class="field" for="code-in"><span>' + (P ? "Nouveau programme envoyé par ton coach : colle le lien" : "Programme envoyé par ton coach : colle le lien") + '</span><textarea id="code-in" placeholder="https://…#p=1.…"></textarea></label><div class="row"><button type="button" class="btn" data-act="paste-install">Installer ce programme</button></div><p class="small muted">Tes séances déjà notées sont conservées.</p></section>';
+  h += profilSheet();
+  h += sportsSheet();
   h += courbesReglage();
   h += '<section class="sheet"><h2>Sauvegarde</h2><p class="small">Tes données ne sont que sur ce téléphone. Exporte une sauvegarde régulièrement, par exemple chaque dimanche, et garde-la dans Fichiers ou envoie-la-toi.</p>' +
     '<div class="row"><button type="button" class="btn primary" data-act="export">Exporter mes données</button></div>' +
@@ -1251,8 +1844,9 @@ function claudeSheet(where) {
   return h + "</section>";
 }
 function summarize(s) {
-  var def = sessionDef(s.type), isLib = s.type === LIBRE;
-  var parts = [fmtShort(s.date) + " " + (isLib ? "séance libre hors salle (" + lieuLabel(s.lieu).toLowerCase() + (s.remplace ? ", remplace " + shortName(s.remplace) : "") + ")" : s.plan ? s.plan.short : def ? def.short || def.name : s.type)];
+  var def = sessionDef(s.type), isLib = s.type === LIBRE, ci = cardioInfo(s), cNew = ci && !ci.legacy && !ci.test;
+  var parts = [fmtShort(s.date) + " " + (isLib ? "séance libre hors salle (" + lieuLabel(s.lieu).toLowerCase() + (s.remplace ? ", remplace " + shortName(s.remplace) : "") + ")" : ci && ci.free ? cardioTitle(s).toLowerCase() : cNew ? (def ? def.short || def.name : "course") + (ci.ctype ? " (" + listLabel(CTYPES, ci.ctype).toLowerCase() + ")" : "") : s.plan ? s.plan.short : def ? def.short || def.name : s.type)];
+  if (cNew) { var cs = cardioSummary(s, ci); if (cs) parts.push(cs); }
   var r = readiness(s.checkin); if (r) parts.push("forme " + fmt(r.avg, 1) + "/5 (" + CHECK.map(function (q) { return q.k + " " + s.checkin[q.k]; }).join(", ") + ")");
   if (isLib) (s.liste || []).forEach(function (it) {
     var c = CAT[it.k], rows = valuesOf((s.sets && s.sets[it.u]) || {}).filter(function (x) { return x && (toNum(x.c) !== null || toNum(x.r) || toNum(x.t)); });
@@ -1269,7 +1863,7 @@ function summarize(s) {
   });
   if (s.arret && s.arret.motif) parts.push("séance terminée plus tôt : " + motifLabel(MOTIFS_ARRET, s.arret.motif) + (s.arret.zone ? " (" + keysOf(s.arret.zone).map(labelZone).join("/") + ")" : "") + (s.arret.intensite ? ", douleur " + s.arret.intensite + "/10" : "") + (s.arret.note ? ", " + s.arret.note : ""));
   if (s.intensite) parts.push("intensité " + s.intensite.toLowerCase() + (s.combats ? ", " + s.combats + " min de combat" : ""));
-  if (s.duree) parts.push(s.duree + " min" + (s.distance ? ", " + s.distance + " km" : "") + (s.allures ? ", allures tenues : " + s.allures.toLowerCase() : ""));
+  if (s.duree && !cNew) parts.push(s.duree + " min" + (s.distance ? ", " + s.distance + " km" : "") + (s.allures ? ", allures tenues : " + s.allures.toLowerCase() : ""));
   if (s.distanceTest) parts.push("test 6 min : " + s.distanceTest + " m");
   if (s.footing) parts.push("footing " + s.footing + " min");
   if (s.tests) parts.push("tests " + JSON.stringify(s.tests));
@@ -1284,12 +1878,14 @@ function planText(date) {
   var w = P ? weekOf(date) : null, types = plannedFor(date) || [], lib = libreOf(date);
   var out = types.map(function (t) {
     var def = P.sessions[t];
+    if (!def) return t;
     if (isReplaced(date, t)) return def.name + " : remplacée aujourd'hui par une séance libre hors salle (" + lieuLabel(lib.lieu).toLowerCase() + ").";
     if (def.kind === "muscu") return def.name + " :\n" + def.ex.map(function (e) { var p = presc(e, w); if (!p) return null; var sg = suggestion(e, p, date); return "  " + e.id + " " + e.name + " : " + p.sets + "×" + p.reps + (p.load ? ", " + p.load : "") + ", RIR " + p.rir + (sg ? " (charge conseillée " + loadLabel(e, sg.load) + ")" : ""); }).filter(Boolean).join("\n");
-    if (def.kind === "course") return def.name + " : " + (def.plan[w - 1] || def.plan[def.plan.length - 1]).texte;
+    if (def.kind === "course") { var cp = def.plan[w - 1] || def.plan[def.plan.length - 1], fl = cp.fr ? fmtLine(cp.fr) : ""; return def.name + " : " + cp.texte + (fl ? " (format : " + fl + (cp.fr.viseTxt ? ", visé " + cp.fr.viseTxt + " par répétition" : "") + ")" : ""); }
     return def.name;
   });
   if (lib && !types.some(function (t) { return isReplaced(date, t); })) out.push("Séance libre hors salle en plus (" + lieuLabel(lib.lieu).toLowerCase() + ").");
+  cardioOf(date).forEach(function (s) { out.push("Activité ajoutée : " + cardioTitle(s).toLowerCase() + "."); });
   return out.join("\n") || "Rien de prévu.";
 }
 function buildPrompt(kind, question) {
@@ -1303,11 +1899,16 @@ function buildPrompt(kind, question) {
     : "Réponds à ma question : « " + question + " »";
   return "Tu es mon préparateur physique. Réponds en français, en me tutoyant.\n\nMON PROGRAMME ET SES RÈGLES\n" + (P ? (P.contexte || "") + (date > lastDay() ? "\nCe bloc est terminé : je fais des séances libres en attendant le suivant." : "") : "Pas de programme : je compose mes séances moi-même (séances libres) et je suis mon volume par muscle et ma force.") +
     "\n\nAUJOURD'HUI : " + fmtLong(date) + ", " + weekLabel(date).toLowerCase() + ".\nSéance prévue :\n" + planText(date) +
-    "\n\nMES SÉANCES DES 21 DERNIERS JOURS (exercice : charge×reps@RIR ; pour les tractions, les dips et les pompes, la charge est le lest ; en séance libre, exercice au temps : durée et marge en secondes)\n" + hist +
+    "\n\nMES SÉANCES DES 21 DERNIERS JOURS (exercice : charge×reps@RIR ; pour les tractions, les dips et les pompes, la charge est le lest ; en séance libre, exercice au temps : durée et marge en secondes ; fractionné : valeur de chaque répétition saisie, FC de fin de répétition entre parenthèses)\n" + hist +
     "\n\nVOLUME DE LA SEMAINE " + (blk ? w : "du " + fmtShort(mon)) + " (séries de travail fractionnées, faites" + (blk ? " / prévues" : "") + ") : " + volText(mon) +
+    "\nCHARGE DE LA SEMAINE (durée en min × difficulté sur 10) : " + chargeText(mon) + profilText() +
     "\n\nPESÉES : " + pes + "\nMOYENNES PAR SEMAINE (4 dernières semaines) : " + (avgs.join(", ") || "aucune") + "\nBILANS DE SEMAINE :\n" + bilans +
     "\n\nMA DEMANDE\n" + ask +
     "\n\nFORMAT : 180 mots maximum, phrases courtes ou puces, chiffres précis. Reste dans la logique du programme sans le réécrire. S'il manque des données, dis lesquelles noter. Une séance arrêtée pour manque de temps ou imprévu, ou un exercice remplacé faute de matériel, ne signale pas une baisse de forme. Pas de diagnostic médical : une douleur qui dure ou augmente se montre à un professionnel de santé. Si tu proposes de modifier le programme, rappelle en une ligne que mon coach valide les changements.";
+}
+function profilText() {
+  var b = fcBands(); if (!b) return "";
+  return "\nPROFIL CARDIO : FC max " + b.mx.v + " bpm" + (b.mx.est ? " (estimée d'après l'âge)" : " (mesurée)") + ", récupération active < " + b.recupHi + " bpm, endurance fondamentale " + b.efLo + "–" + b.efHi + " bpm.";
 }
 function copyText(t) {
   function fallback() {
@@ -1350,7 +1951,7 @@ function importFile(file) {
     var obj; try { obj = JSON.parse(reader.result); } catch (err) { toast("Ce fichier n'est pas lisible."); return; }
     if (obj && obj.format === "carnet-muscu-export" && obj.data) {
       dialog("Restaurer cette sauvegarde ?", '<p class="small">Sauvegarde du ' + esc(new Date(obj.exporte).toLocaleDateString("fr-FR")) + '. Elle remplace toutes les données actuelles de ce téléphone.</p>', [
-        { label: "Restaurer", cls: "primary", run: function () { D = normalize(obj.data); persistNow(); setActive(); S.date = initialDate(); S.mon = mondayOfDate(S.date); S.view = "jour"; render(); toast("Sauvegarde restaurée."); } },
+        { label: "Restaurer", cls: "primary", run: function () { D = normalize(obj.data); migrateCardio(); freezeAll(true); persistNow(); setActive(); S.date = initialDate(); S.mon = mondayOfDate(S.date); S.view = "jour"; render(); toast("Sauvegarde restaurée."); } },
         { label: "Annuler" }]);
       return;
     }
@@ -1387,6 +1988,7 @@ function docFor(col, id) {
     var w = Number(id.split("-S").pop()); return weekDoc(w, true);
   }
   if (col === "pesees") { if (!D.pesees[id]) D.pesees[id] = { date: id }; return D.pesees[id]; }
+  if (col === "profil") { if (!D.profil) D.profil = {}; return D.profil; }
   return null;
 }
 app.addEventListener("click", function (ev) {
@@ -1420,6 +2022,18 @@ app.addEventListener("click", function (ev) {
     case "arretopen": doc = docFor("seances", b.dataset.id); doc.arret = { ouvert: true }; persist(); render(); break;
     case "arretclose": doc = docFor("seances", b.dataset.id); delete doc.arret; persist(); render(); break;
     case "librestart": libreDialog(S.date, b.dataset.t); break;
+    case "cardiostart": cardioDialog(S.date, null); break;
+    case "cardioedit": cardioDialog(S.date, b.dataset.id); break;
+    case "fmtmode": doc = docFor("seances", b.dataset.id); setPath(doc, "fmt.mode", b.dataset.v); persist(); render(); break;
+    case "addrep": doc = docFor("seances", b.dataset.id); setPath(doc, "nRep." + b.dataset.i, Number(b.dataset.n)); persist(); render(); break;
+    case "addser": doc = docFor("seances", b.dataset.id); doc.nSer = Number(b.dataset.n); persist(); render(); break;
+    case "progvue": D.vue.prog = b.dataset.v; persist(); render(); break;
+    case "fracsel": D.vue.frac = b.dataset.k; persist(); render(); break;
+    case "sporttog":
+      var sv = D.vue.sports || {}, onl = sportsOn();
+      if (sv[b.dataset.v] !== false && onl.length <= 1) { toast("Garde au moins une discipline."); break; }
+      sv[b.dataset.v] = sv[b.dataset.v] === false; D.vue.sports = sv; persist(); render(); break;
+    case "omstog": D.vue.oms = b.dataset.v === "1"; persist(); render(); break;
     case "libreedit": libreDialog(S.date, null); break;
     case "libreadd": libreMenu(b.dataset.id); break;
     case "librerm": libreRemove(b.dataset.id, b.dataset.u); break;
@@ -1451,17 +2065,20 @@ app.addEventListener("click", function (ev) {
 app.addEventListener("change", function (ev) {
   var el = ev.target;
   if (el.dataset.act === "add" && el.value === LIBRE) { el.value = ""; libreDialog(S.date, null); return; }
+  if (el.dataset.act === "add" && el.value === "CARDIO") { el.value = ""; cardioDialog(S.date, null); return; }
+  if (el.dataset.col === "profil" || (el.dataset.path && /^fmt\./.test(el.dataset.path))) { render(); return; }
   if (el.dataset.act === "add" && el.value) { var s = seance(S.date, el.value, true); s.ajoutee = true; persist(); render(); return; }
   if (el.dataset.act === "import-file" && el.files && el.files[0]) { importFile(el.files[0]); el.value = ""; return; }
   if (el.dataset.path && /\.nom$/.test(el.dataset.path)) render();
 });
-var NUMERIC = /\.(c|r|rir|t|m)$|^kg$|^duree$|^distance$|^distanceTest$|^combats$|^footing$|^sommeil$|^tests\.|^mensu\./;
+var NUMERIC = /\.(c|r|rir|t|m)$|^kg$|^duree$|^distance$|^distanceTest$|^combats$|^footing$|^sommeil$|^tests\.|^mensu\.|^age$|^fcmax$|^fcrepos$|^deniv$|^fcMoy$|^fcMax$|^puiss$|^distTot$|^reps\.\d+\.\d+\.(d|p|v|fc)$|^fmt\.(effort|recup|reps|series|entre|echauf|calme)$/;
 app.addEventListener("input", function (ev) {
   var el = ev.target; if (!el.dataset || !el.dataset.path) return;
   var doc = docFor(el.dataset.col, el.dataset.id); if (!doc) return;
   var v = el.value.trim();
   setPath(doc, el.dataset.path, NUMERIC.test(el.dataset.path) ? (v === "" ? null : (toNum(v) !== null ? toNum(v) : v)) : v);
   persist();
+  if (el.dataset.col === "seances") liveUpdate(el.dataset.id);
 });
 
 /* ================= Mode hors ligne ================= */
@@ -1481,7 +2098,8 @@ if ("serviceWorker" in navigator && (location.protocol === "https:" || location.
 }
 
 /* ================= Démarrage ================= */
-if (freezeAll(true)) persistNow();
+var migrated = migrateCardio();
+if (freezeAll(true) || migrated) persistNow();
 render();
 var startCode = extractCode(location.hash);
 if (startCode) {
