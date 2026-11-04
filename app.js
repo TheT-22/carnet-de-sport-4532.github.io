@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.3.0";
+var APP_VERSION = "1.4.0";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -598,14 +598,24 @@ function modPanel(e, p, s, id, mod, planned, rirT, date) {
   if (mod.motif === "douleur") h += '<div class="scale"><div class="scale-q"><span>Où ?</span></div>' + zones(id, "mods." + e.id + ".zone", mod.zone) + "</div>";
   if (mod.motif === "autre") h += '<label class="field"><span>Précise</span>' + inp("seances", id, "mods." + e.id + ".precision", mod.precision, "") + "</label>";
   if (mod.statut === "remplace") {
-    var rp = (s.remp || {})[e.id] || {}, alts = e.alt || [];
-    if (alts.length) h += '<div class="scale"><div class="scale-q"><span>Exercice de remplacement</span></div>' + seg("seances", id, "remp." + e.id + ".nom", alts, rp.nom) + "</div>";
-    h += '<label class="field"><span>' + (alts.length ? "Ou écris son nom" : "Exercice de remplacement") + "</span>" + inp("seances", id, "remp." + e.id + ".nom", alts.indexOf(rp.nom) >= 0 ? "" : rp.nom, 'placeholder="Nom de l\'exercice"') + "</label>";
-    if (rp.nom) {
-      var last = lastRemp(rp.nom, date), load = last ? targetFrom(last, p, e.step || 2.5, 0, 0) : null, rows = rp.sets || {};
-      h += '<p class="advice">' + (last ? "Charge conseillée : " + esc(fmt(load)) + ' kg <span class="muted">(dernière fois le ' + esc(fmtShort(last.date)) + ")</span>" : "Première fois sur cet exercice : choisis la charge au RIR visé, même nombre de séries et de reps.") + "</p>";
-      h += setRows(id, "remp." + e.id + ".sets", rows, Math.max(planned, keysOf(rows).length), { head: "Charge (kg)", load: load, reps: p.repsN, rir: rirT });
-      h += '<p class="small muted">Ces séries sont gardées à part : elles ne changent pas les charges conseillées de « ' + esc(e.name) + " ».</p>";
+    var rp = (s.remp || {})[e.id] || {}, rc = rp.k ? CAT[rp.k] : null, rows = rp.sets || {};
+    h += '<div class="scale"><div class="scale-q"><span>Exercice de remplacement</span></div>';
+    if (rc) {
+      h += '<div class="row"><b class="grow">' + esc(rc.n) + '</b><button type="button" class="btn small" data-act="rempchange" data-id="' + esc(id) + '" data-ex="' + esc(e.id) + '">Changer</button></div></div>';
+    } else {
+      var sug = rempSuggestions(e);
+      if (sug.length) h += '<p class="small muted">Proposés dans la bibliothèque, pour les mêmes muscles :</p><div class="seg">' + sug.map(function (k) { return '<button type="button" data-act="rempk" data-id="' + esc(id) + '" data-ex="' + esc(e.id) + '" data-k="' + k + '">' + esc(CAT[k].n) + "</button>"; }).join("") + "</div>";
+      h += '<div><button type="button" class="btn small" data-act="rempmenu" data-id="' + esc(id) + '" data-ex="' + esc(e.id) + '">' + (sug.length ? "Autre exercice de la bibliothèque" : "Choisir dans la bibliothèque") + "</button></div></div>";
+      h += '<label class="field"><span>Ou écris son nom, s\'il n\'est pas dans la bibliothèque</span>' + inp("seances", id, "remp." + e.id + ".nom", rp.nom, 'placeholder="Nom de l\'exercice"') + "</label>";
+    }
+    if (rc || rp.nom) {
+      var last = rc ? lastCat(rp.k, date) : lastRemp(rp.nom, date), step = rc ? (rc.per ? 2 : 2.5) : (e.step || 2.5);
+      var bwThen = rc && rc.bw && last ? bodyweight(last.date) * (rc.bwf || 1) : 0, bwNow = rc && rc.bw ? bodyweight(date) * (rc.bwf || 1) : 0;
+      var load = last ? targetFrom(last, p, step, bwThen, bwNow) : null, le = { bw: !!(rc && rc.bw) };
+      h += '<p class="advice">' + (last ? "Charge conseillée : " + esc(loadLabel(le, load)) + ' <span class="muted">(dernière fois le ' + esc(fmtShort(last.date)) + ")</span>" : "Première fois sur cet exercice : choisis la charge au RIR visé, même nombre de séries et de reps.") + "</p>";
+      h += setRows(id, "remp." + e.id + ".sets", rows, Math.max(planned, keysOf(rows).length), { head: rc && rc.bw ? "Lest (kg)" : rc && rc.per ? "kg / haltère" : "Charge (kg)", load: load, reps: p.repsN, rir: rirT });
+      h += '<p class="small muted">' + (rc ? "Ces séries comptent pour « " + esc(rc.n) + " » dans tes courbes de force et ton volume. Elles ne changent pas les charges conseillées de « " + esc(e.name) + " »."
+        : "Ces séries comptent dans ton volume pour les muscles de « " + esc(e.name) + " », mais n'ont pas de courbe de force et ne changent pas ses charges conseillées. Choisis l'exercice dans la bibliothèque pour qu'il ait sa courbe.") + "</p>";
     }
   }
   return h + '<div><button type="button" class="btn small quiet" data-act="modclose" data-id="' + esc(id) + '" data-ex="' + esc(e.id) + '">Annuler, exercice fait normalement</button></div></div>';
@@ -653,6 +663,7 @@ function catRows(s, k) {
   var out = [];
   if (s.type === LIBRE) (s.liste || []).forEach(function (it) { if (it.k === k && s.sets && s.sets[it.u]) out = out.concat(rowsFor(CAT[k], s.sets[it.u])); });
   else if (s.sets) keysOf(s.sets).forEach(function (exId) { var e = progEx(s, exId); if (e && e.cat === k) out = out.concat(rowsOk(s.sets[exId])); });
+  if (s.type !== LIBRE) keysOf(s.remp).forEach(function (exId) { var r = s.remp[exId]; if (r && r.k === k && r.sets) out = out.concat(rowsOk(r.sets)); });
   return out;
 }
 function byDateDesc(a, b) { return a.date < b.date ? 1 : -1; }
@@ -779,6 +790,37 @@ function libreDialog(date, preT) {
       else del();
     }
   });
+}
+/* Remplacement d'un exercice du programme : exercices de la bibliothèque qui travaillent directement
+   le même muscle principal, en commençant par les remplacements cités par le programme. */
+function primaryMuscle(e) {
+  var c = CAT[exCat(e)], mu = (c && c.mu) || e.mu || {};
+  for (var k in mu) if (mu[k] === 1) return k;
+  return null;
+}
+function rempSuggestions(e) {
+  var own = exCat(e), pm = primaryMuscle(e), out = [];
+  function ok(k) { var c = CAT[k]; return c && !c.time && k !== own && out.indexOf(k) < 0 && !CATALOGUE.some(function (g) { return g.hidden && g.ex.indexOf(c) >= 0; }); }
+  (e.alt || []).forEach(function (a) { var k = bankMatch(a); if (ok(k) && pm && CAT[k].mu && CAT[k].mu[pm]) out.push(k); });
+  if (pm) CATALOGUE.forEach(function (g) { if (!g.hidden) g.ex.forEach(function (c) { if (ok(c.k) && c.mu && c.mu[pm] === 1) out.push(c.k); }); });
+  return out.slice(0, 6);
+}
+function rempMenu(id, exId, e) {
+  var date = id.slice(0, id.lastIndexOf("_")), h = '<h2 id="dlg-t">Exercice de remplacement</h2><p class="small muted">Remplace « ' + esc(e.name) + " » par un exercice de la bibliothèque.</p>";
+  var own = exCat(e);
+  CATALOGUE.forEach(function (g) {
+    if (g.hidden || g.ex.every(function (c) { return c.time; })) return;
+    h += '<div class="menu-group"><h3>' + esc(g.g) + "</h3>";
+    g.ex.forEach(function (c) { if (c.time) return; var last = lastCat(c.k, date); h += '<button type="button" class="pick" data-sh="pick" data-k="' + c.k + '"' + (c.k === own ? " disabled" : "") + "><span>" + esc(c.n) + '</span><span class="meta">' + (c.k === own ? "exercice prévu" : last ? esc(fmtShort(last.date)) : "") + "</span></button>"; });
+    h += "</div>";
+  });
+  h += '<div><button type="button" class="btn wide" data-sh="cancel">Fermer</button></div>';
+  openSheet(h, function (b, close) { close(); if (b.dataset.sh === "pick") setRemp(id, exId, b.dataset.k); }, true);
+}
+function setRemp(id, exId, k) {
+  var doc = docFor("seances", id), rp = (doc.remp && doc.remp[exId]) || {};
+  if (k) { rp.k = k; rp.nom = CAT[k].n; } else { delete rp.k; delete rp.nom; }
+  setPath(doc, "remp." + exId, rp); persist(); render();
 }
 function libreMenu(id) {
   var date = id.slice(0, id.lastIndexOf("_")), s = D.seances[id], present = {};
@@ -980,7 +1022,12 @@ function seanceVol(s, v) {
     return;
   }
   keysOf(s.sets).forEach(function (exId) { var e = progEx(s, exId); if (e && e.mu) addVol(v, e.mu, e.gr, volRows(s.sets[exId], false)); });
-  keysOf(s.remp).forEach(function (exId) { var r = s.remp[exId], e = progEx(s, exId); if (r && r.sets && e && e.mu) addVol(v, e.mu, e.gr, volRows(r.sets, false)); });
+  keysOf(s.remp).forEach(function (exId) {
+    var r = s.remp[exId], e = progEx(s, exId), rc = r && r.k ? CAT[r.k] : null;
+    if (!r || !r.sets) return;
+    if (rc && rc.mu) addVol(v, rc.mu, rc.gr, volRows(r.sets, false));
+    else if (e && e.mu) addVol(v, e.mu, e.gr, volRows(r.sets, false));
+  });
 }
 function doneVol(from, to) {
   var v = emptyVol();
@@ -1073,11 +1120,13 @@ function curveIndex() {
     if (!prev || best > prev.y) c.byDate[s.date] = { x: s.date, y: best, hollow: hollow };
   }
   valuesOf(D.seances).forEach(function (s) {
-    if (!s.sets) return;
+    if (!s.sets && !s.remp) return;
     if (s.type === LIBRE) {
+      if (!s.sets) return;
       (s.liste || []).forEach(function (it) { var c = CAT[it.k]; if (c && !c.time && s.sets[it.u]) add("cat:" + it.k, c.n, CAT_ORDER[it.k], c.bw, c.bwf, s, rowsOk(s.sets[it.u]), true); });
       return;
     }
+    keysOf(s.remp).forEach(function (exId) { var r = s.remp[exId], c = r && r.k ? CAT[r.k] : null; if (c && !c.time && r.sets) add("cat:" + r.k, c.n, CAT_ORDER[r.k], c.bw, c.bwf, s, rowsOk(r.sets), false); });
     keysOf(s.sets).forEach(function (exId) {
       var e = progEx(s, exId); if (!e) return;
       if (e.cat && CAT[e.cat]) add("cat:" + e.cat, CAT[e.cat].n, CAT_ORDER[e.cat], e.bw, CAT[e.cat].bwf, s, rowsOk(s.sets[exId]), false);
@@ -1356,6 +1405,12 @@ app.addEventListener("click", function (ev) {
       if (b.dataset.c !== "") setPath(doc, b.dataset.base + "c", Number(b.dataset.c));
       setPath(doc, b.dataset.base + "r", Number(b.dataset.r)); setPath(doc, b.dataset.base + "rir", Number(b.dataset.rir)); persist(); render(); break;
     case "addset": doc = docFor("seances", b.dataset.id); setPath(doc, b.dataset.base, { c: "" }); render(); break;
+    case "rempk": setRemp(b.dataset.id, b.dataset.ex, b.dataset.k); break;
+    case "rempchange": setRemp(b.dataset.id, b.dataset.ex, null); break;
+    case "rempmenu":
+      doc = docFor("seances", b.dataset.id);
+      var rex = progEx(doc, b.dataset.ex), pdef = (P && P.sessions[doc.type]) || {}, pe = (pdef.ex || []).filter(function (x) { return x.id === b.dataset.ex; })[0] || (doc.plan && doc.plan.ex.filter(function (x) { return x.id === b.dataset.ex; })[0]);
+      rempMenu(b.dataset.id, b.dataset.ex, { id: b.dataset.ex, name: rex ? rex.name : b.dataset.ex, cat: pe ? exCat(pe) : "", mu: pe ? pe.mu : null, alt: pe ? pe.alt : [] }); break;
     case "modopen": doc = docFor("seances", b.dataset.id); setPath(doc, "mods." + b.dataset.ex, { statut: "remplace" }); persist(); render(); break;
     case "modclose": doc = docFor("seances", b.dataset.id); setPath(doc, "mods." + b.dataset.ex, null); setPath(doc, "remp." + b.dataset.ex, null); persist(); render(); break;
     case "arretopen": doc = docFor("seances", b.dataset.id); doc.arret = { ouvert: true }; persist(); render(); break;
