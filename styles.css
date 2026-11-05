@@ -404,3 +404,5 @@ details summary { cursor: pointer; color: var(--plate); font-weight: 600; paddin
 .chk-item .st { color: var(--ok); font-weight: 550; }
 .chk-item[aria-checked="true"] .st { color: var(--plate); }
 .chip .icon-btn { background: transparent; border: 0; }
+.morning .row.end { flex-wrap: nowrap; }
+.morning .stat { flex: 0 0 8.5rem; }

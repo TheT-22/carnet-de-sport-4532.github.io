@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.6.0";
+var APP_VERSION = "1.6.1";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -557,9 +557,26 @@ function weekAvg(mon) {
   for (var i = 0; i < 7; i++) { var p = D.pesees[addDays(mon, i)], k = p ? toNum(p.kg) : null; if (k) vals.push(k); }
   return vals.length ? vals.reduce(function (a, b) { return a + b; }, 0) / vals.length : null;
 }
+/* Heures de sommeil : « 7 h 30 », « 7h30 », « 7,5 » ou « 7.5 » */
+function parseHours(v) {
+  var t = String(v === undefined || v === null ? "" : v).trim().toLowerCase(); if (!t) return null;
+  var m = t.match(/^(\d{1,2})\s*h\s*(\d{0,2})\s*(min)?$/);
+  var x = m ? Number(m[1]) + (m[2] ? Number(m[2]) / 60 : 0) : toNum(t);
+  return x !== null && x >= 0 && x <= 24 ? Math.round(x * 100) / 100 : null;
+}
+function fmtHours(x) { if (x === null || x === undefined || !isFinite(x)) return "–"; var mn = Math.round(x * 60), hh = Math.floor(mn / 60); return hh + " h " + pad(mn % 60); }
+function sleepWeek(mon) {
+  var nights = [];
+  for (var i = 0; i < 7; i++) { var d = addDays(mon, i), p = D.pesees[d], x = p ? parseHours(p.sommeil) : null; nights.push({ date: d, h: x }); }
+  var vals = nights.filter(function (n) { return n.h !== null; }).map(function (n) { return n.h; });
+  return { nights: nights, n: vals.length, avg: vals.length ? vals.reduce(function (a, b) { return a + b; }, 0) / vals.length : null };
+}
+function sleepLabel(sw) { return sw.n ? "moyenne de la semaine, " + sw.n + " nuit" + (sw.n > 1 ? "s" : "") : "moyenne de la semaine"; }
 function weightSheet(date) {
-  var p = D.pesees[date] || {}, avg = weekAvg(mondayOfDate(date));
-  return '<div class="sheet"><div class="row end"><label class="field grow" for="kg-' + date + '"><span>Pesée du matin, à jeun (kg)</span>' + inp("pesees", date, "kg", p.kg, 'id="kg-' + date + '" inputmode="decimal" class="n" placeholder="ex. 76,2"') + '</label><div class="stat"><b>' + fmt(avg, 2) + '</b><span>moyenne de la semaine</span></div></div></div>';
+  var p = D.pesees[date] || {}, mon = mondayOfDate(date), avg = weekAvg(mon), sw = sleepWeek(mon), sl = parseHours(p.sommeil);
+  return '<div class="sheet morning"><h2>Ce matin</h2><div class="row end"><label class="field grow" for="kg-' + date + '"><span>Pesée, à jeun (kg)</span>' + inp("pesees", date, "kg", p.kg, 'id="kg-' + date + '" inputmode="decimal" class="n" placeholder="ex. 76,2"') + '</label><div class="stat"><b data-avg="kg">' + fmt(avg, 2) + '</b><span>moyenne de la semaine</span></div></div>' +
+    '<div class="row end"><label class="field grow" for="sl-' + date + '"><span>Heures de sommeil cette nuit</span>' + inp("pesees", date, "sommeil", sl !== null ? fmtHours(sl) : p.sommeil, 'id="sl-' + date + '" class="n" placeholder="ex. 7 h 30"') + '</label><div class="stat"><b data-avg="sommeil">' + fmtHours(sw.avg) + '</b><span data-avg="sommeil-n">' + sleepLabel(sw) + "</span></div></div>" +
+    '<p class="tiny muted">Ex. 7 h 30 ou 7,5. À noter chaque matin, même les jours de repos.</p></div>';
 }
 function addSheet(date, types) {
   var opts = (inBlock(date) ? keysOf(P.sessions) : ["MENSU"]).filter(function (t) { return types.indexOf(t) < 0; });
@@ -585,7 +602,7 @@ function sessionSheet(date, type, w) {
 }
 function checkin(s, id) {
   var c = s.checkin || {}, h = '<div class="section"><h3>Avant de commencer</h3><p class="small muted">Note chaque point de 1 à 5 : 5, c\'est au mieux.</p>';
-  CHECK.forEach(function (q) { h += scaleQ(id, "checkin." + q.k, q.label, q.lo, q.hi, c[q.k]); });
+  CHECK.forEach(function (q) { h += scaleQ(id, "checkin." + q.k, q.label, q.lo, q.hi, c[q.k]); if (q.k === "sommeil") h += '<p class="tiny muted">Les heures se notent en haut, dans « Ce matin » ; ici, la qualité du sommeil.</p>'; });
   var r = readiness(c);
   if (r) h += '<div class="note ' + r.level + '"><b>' + r.title + " (" + fmt(r.avg, 1) + " sur 5).</b> " + r.text + "</div>";
   return h + "</div>";
@@ -1531,7 +1548,8 @@ function viewSemaine() {
   var cur = weekAvg(mon), prev = weekAvg(addDays(mon, -7)), sports = valuesOf(D.seances).filter(function (s) { return s.date >= mon && s.date <= sun && s.intensite; });
   var sheet = '<div class="sheet">';
   if (blk && versionKeys().length > 1) sheet += '<div class="scale"><div class="scale-q"><span>Organisation de la semaine</span></div>' + seg("semaines", id, "version", versionKeys().map(function (k) { return { v: k, l: P.versions[k].label }; }), wd.version) + "</div>";
-  sheet += '<div class="kpis"><div class="kpi"><b>' + fmt(cur, 2) + '</b><span>poids moyen (kg)</span></div><div class="kpi"><b>' + (cur && prev ? (cur - prev >= 0 ? "+" : "") + fmt(cur - prev, 2) : "–") + "</b><span>" + esc(blk && P.poidsCibleTexte || "écart avec la semaine d'avant") + '</span></div><div class="kpi"><b>' + countDone(mon, sun) + "</b><span>séances notées</span></div></div>";
+  var sw = sleepWeek(mon);
+  sheet += '<div class="kpis two"><div class="kpi"><b>' + fmt(cur, 2) + '</b><span>poids moyen (kg)</span></div><div class="kpi"><b>' + (cur && prev ? (cur - prev >= 0 ? "+" : "") + fmt(cur - prev, 2) : "–") + "</b><span>" + esc(blk && P.poidsCibleTexte || "écart avec la semaine d'avant") + '</span></div><div class="kpi"><b>' + fmtHours(sw.avg) + "</b><span>sommeil moyen" + (sw.n ? ", " + sw.n + " nuit" + (sw.n > 1 ? "s" : "") : "") + '</span></div><div class="kpi"><b>' + countDone(mon, sun) + "</b><span>séances notées</span></div></div>";
   if (sports.length) sheet += '<p class="small muted">Intensité des séances de ' + esc((P && P.sessions.SAMBO && P.sessions.SAMBO.name || "sport").toLowerCase()) + " : " + esc(sports.map(function (s) { return s.intensite.toLowerCase(); }).join(", ")) + ".</p>";
   h += sheet + '</div><div class="sheet"><div class="weeklist">';
   for (var i = 0; i < 7; i++) {
@@ -1553,7 +1571,10 @@ function viewSemaine() {
   h += weekCardioSheets(mon);
   h += '<section class="sheet"><h2>Bilan de la semaine</h2>';
   h += '<div class="scale"><div class="scale-q"><span>Fatigue générale</span><span class="ends">1 en forme, 10 épuisé</span></div>' + seg("semaines", id, "fatigue", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], wd.fatigue, true) + "</div>";
-  h += '<label class="field"><span>Sommeil moyen par nuit (heures)</span>' + inp("semaines", id, "sommeil", wd.sommeil, 'inputmode="decimal" placeholder="ex. 7,5"') + "</label>";
+  if (sw.n) {
+    h += '<div class="section"><div class="row spread"><span>Sommeil moyen par nuit</span><b class="num">' + fmtHours(sw.avg) + '</b></div><p class="tiny muted">Calculé avec ' + (sw.n > 1 ? "les " + sw.n + " nuits notées" : "la nuit notée") + ' le matin dans Aujourd\'hui.</p>' +
+      '<details><summary class="small">Détail des nuits</summary><dl class="kv">' + sw.nights.map(function (n) { return "<dt>" + esc(fmtDayName(n.date) + " " + parse(n.date).getDate()) + "</dt><dd>" + esc(fmtHours(n.h)) + "</dd>"; }).join("") + "</dl></details></div>";
+  } else h += '<label class="field"><span>Sommeil moyen par nuit (heures), si tu n\'as noté aucune nuit</span>' + inp("semaines", id, "sommeil", wd.sommeil, 'inputmode="decimal" placeholder="ex. 7,5"') + "</label>";
   h += '<label class="field"><span>Douleurs, même légères</span>' + txt("semaines", id, "douleurs", wd.douleurs, "Épaules, genoux, coudes, cou…") + "</label>";
   h += '<label class="field"><span>Exercices aimés, détestés ou machines indisponibles</span>' + txt("semaines", id, "exercices", wd.exercices, "Facultatif") + "</label></section>";
   h += claudeSheet("semaine");
@@ -2577,7 +2598,8 @@ function buildPrompt(kind, question) {
   var date = S.date, mon = mondayOfDate(date), blk = blockWeek(mon), w = blk ? weekOf(mon) : null, from = addDays(date, -21);
   var hist = valuesOf(D.seances).filter(function (s) { return s.date >= from && s.date <= date && (hasData(s) || s.checkin); }).sort(function (a, b) { return a.date < b.date ? -1 : 1; }).map(summarize).join("\n") || "Aucune séance notée.";
   var pes = valuesOf(D.pesees).filter(function (p) { return p.date >= from && toNum(p.kg); }).sort(function (a, b) { return a.date < b.date ? -1 : 1; }).map(function (p) { return fmtShort(p.date) + " " + p.kg + " kg"; }).join(", ") || "aucune";
-  var avgs = []; for (var m = mondayOfDate(addDays(date, -28)); m <= mon; m = addDays(m, 7)) { var a = weekAvg(m); if (a) avgs.push("semaine du " + fmtShort(m) + " " + fmt(a, 2) + " kg"); }
+  var avgs = [], sleeps = []; for (var m = mondayOfDate(addDays(date, -28)); m <= mon; m = addDays(m, 7)) { var a = weekAvg(m), sl = sleepWeek(m); if (a) avgs.push("semaine du " + fmtShort(m) + " " + fmt(a, 2) + " kg"); if (sl.n) sleeps.push("semaine du " + fmtShort(m) + " " + fmtHours(sl.avg) + " (" + sl.n + " nuit" + (sl.n > 1 ? "s" : "") + ")"); }
+  var nuits = valuesOf(D.pesees).filter(function (p) { return p.date >= from && p.date <= date && parseHours(p.sommeil) !== null; }).sort(function (a, b) { return a.date < b.date ? -1 : 1; }).map(function (p) { return fmtShort(p.date) + " " + fmtHours(parseHours(p.sommeil)); }).join(", ");
   var bilans = valuesOf(D.semaines).filter(function (b) { return (P && b.programme === P.id) || (b.lundi && b.lundi >= mondayOfDate(from)); }).map(function (b) { return (b.semaine ? "S" + b.semaine : "semaine du " + fmtShort(b.lundi)) + (b.version && P && P.versions[b.version] ? ", " + P.versions[b.version].label.toLowerCase() : "") + (b.fatigue ? ", fatigue " + b.fatigue + "/10" : "") + (b.sommeil ? ", sommeil " + b.sommeil + " h" : "") + (b.douleurs ? ", douleurs : " + b.douleurs : "") + (b.exercices ? ", exercices : " + b.exercices : ""); }).join("\n") || "aucun";
   var ask = kind === "jour" ? "Propose des ajustements concrets pour la séance prévue aujourd'hui (charges en kg, nombre de séries, RIR, exercice à remplacer si besoin), en tenant compte de mon check-in du jour, de mes dernières séances et de mon activité sportive récente."
     : kind === "semaine" ? "Fais le bilan de ma semaine " + (blk ? w : "du " + fmtShort(mon)) + " (progression des charges, forme, poids par rapport à l'objectif, douleurs) et propose 2 ou 3 ajustements précis pour la semaine suivante."
@@ -2587,7 +2609,7 @@ function buildPrompt(kind, question) {
     "\n\nMES SÉANCES DES 21 DERNIERS JOURS (exercice : charge×reps@RIR ; pour les tractions, les dips et les pompes, la charge est le lest ; en séance libre, exercice au temps : durée et marge en secondes ; fractionné : valeur de chaque répétition saisie, FC de fin de répétition entre parenthèses)\n" + hist +
     "\n\nVOLUME DE LA SEMAINE " + (blk ? w : "du " + fmtShort(mon)) + " (séries de travail fractionnées, faites" + (blk ? " / prévues" : "") + ") : " + volText(mon) +
     "\nCHARGE DE LA SEMAINE (durée en min × difficulté sur 10) : " + chargeText(mon) + profilText() +
-    "\n\nPESÉES : " + pes + "\nMOYENNES PAR SEMAINE (4 dernières semaines) : " + (avgs.join(", ") || "aucune") + "\nBILANS DE SEMAINE :\n" + bilans +
+    "\n\nPESÉES : " + pes + "\nMOYENNES PAR SEMAINE (4 dernières semaines) : " + (avgs.join(", ") || "aucune") + "\nSOMMEIL PAR NUIT : " + (nuits || "non noté") + (sleeps.length ? "\nSOMMEIL MOYEN PAR SEMAINE : " + sleeps.join(", ") : "") + "\nBILANS DE SEMAINE :\n" + bilans +
     "\n\nMA DEMANDE\n" + ask +
     "\n\nFORMAT : 180 mots maximum, phrases courtes ou puces, chiffres précis. Reste dans la logique du programme sans le réécrire. S'il manque des données, dis lesquelles noter. Une séance arrêtée pour manque de temps ou imprévu, ou un exercice remplacé faute de matériel, ne signale pas une baisse de forme. Pas de diagnostic médical : une douleur qui dure ou augmente se montre à un professionnel de santé. Si tu proposes de modifier le programme, rappelle en une ligne que mon coach valide les changements.";
 }
@@ -2814,8 +2836,13 @@ app.addEventListener("input", function (ev) {
   if (el.dataset.col === "ed") { edInput(el); return; }
   var doc = docFor(el.dataset.col, el.dataset.id); if (!doc) return;
   var v = el.value.trim();
-  setPath(doc, el.dataset.path, NUMERIC.test(el.dataset.path) ? (v === "" ? null : (toNum(v) !== null ? toNum(v) : v)) : v);
+  if (el.dataset.col === "pesees" && el.dataset.path === "sommeil") setPath(doc, "sommeil", v === "" ? null : parseHours(v) !== null ? parseHours(v) : v);
+  else setPath(doc, el.dataset.path, NUMERIC.test(el.dataset.path) ? (v === "" ? null : (toNum(v) !== null ? toNum(v) : v)) : v);
   persist();
+  if (el.dataset.col === "pesees") {
+    var mon0 = mondayOfDate(el.dataset.id), sw0 = sleepWeek(mon0), a0 = app.querySelector('[data-avg="kg"]'), a1 = app.querySelector('[data-avg="sommeil"]'), a2 = app.querySelector('[data-avg="sommeil-n"]');
+    if (a0) a0.textContent = fmt(weekAvg(mon0), 2); if (a1) a1.textContent = fmtHours(sw0.avg); if (a2) a2.textContent = sleepLabel(sw0);
+  }
   if (el.dataset.col === "seances") liveUpdate(el.dataset.id);
 });
 
