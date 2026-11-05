@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.9.0";
+var APP_VERSION = "1.10.0";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -263,6 +263,7 @@ function sessionLabel(s) { if (s.type === LIBRE) return "Séance libre"; if (isC
 function plannedFor(date) {
   var base = plannedBase(date); if (base === null) return null;
   compPlanned(date).forEach(function (t) { if (base.indexOf(t) < 0) base.push(t); });
+  if (D.avances) base = base.filter(function (t) { return !D.avances[date + "_" + t]; });
   return base;
 }
 function plannedBase(date) {
@@ -292,10 +293,10 @@ function plannedBase(date) {
   if (date === P.debut && P.sessions.MENSU && !P.cree) out.unshift("MENSU");
   return out;
 }
-var NOT_DATA = ["date", "type", "semaine", "programme", "checkin", "ajoutee", "maj", "libre", "lieu", "remplace", "liste", "nU", "cardio", "sport", "ctype", "fmt", "velMes", "nSer", "nRep", "legacy", "fplan", "ftexte", "fsport", "fctype", "fspec", "adapte", "alerteA"];
+var NOT_DATA = ["date", "type", "semaine", "programme", "checkin", "ajoutee", "maj", "libre", "lieu", "remplace", "liste", "nU", "cardio", "sport", "ctype", "fmt", "velMes", "nSer", "nRep", "legacy", "fplan", "ftexte", "fsport", "fctype", "fspec", "adapte", "alerteA", "pour", "avanceDe", "garderSeries", "modele"];
 function hasData(s) {
   if (!s) return false;
-  return keysOf(s).some(function (k) { return NOT_DATA.indexOf(k) < 0 && s[k] !== undefined && s[k] !== null && JSON.stringify(s[k]) !== "{}"; });
+  return keysOf(s).some(function (k) { if (k === "smod") return !!(s.smod && s.smod.statut); return NOT_DATA.indexOf(k) < 0 && s[k] !== undefined && s[k] !== null && JSON.stringify(s[k]) !== "{}"; });
 }
 function seanceId(date, type) { return date + "_" + type; }
 function seance(date, type, create) {
@@ -320,7 +321,7 @@ function isReplaced(date, t) { var l = libreOf(date); return !!(l && l.remplace 
 function replacedDone(date, t) { var l = libreOf(date); return !!(l && l.remplace === t && hasData(l)); }
 function lieuLabel(v) { for (var i = 0; i < LIEUX.length; i++) if (LIEUX[i].v === v) return LIEUX[i].l; return "Hors salle"; }
 function shortName(t) { var d = sessionDef(t); return d ? d.short || d.name : t; }
-function libreSub(s) { return lieuLabel(s.lieu) + (s.remplace ? " · remplace " + shortName(s.remplace) : ""); }
+function libreSub(s) { return lieuLabel(s.lieu) + (s.modele ? " · " + s.modele : "") + (s.remplace ? " · remplace " + shortName(s.remplace) : ""); }
 
 /* ================= Charges ================= */
 function presc(e, w) {
@@ -538,6 +539,7 @@ function viewJour() {
   var types = (plan || compPlanned(date)).slice();
   valuesOf(D.seances).forEach(function (s) { if (s.date === date && types.indexOf(s.type) < 0 && s.type !== LIBRE && !isCardioType(s.type) && (sessionDef(s.type) || (hasData(s) && defOf(s)))) types.push(s.type); });
   if (!types.length && plan !== null && !libreOf(date) && !cardioOf(date).length) h += freeSheet(date);
+  keysOf(D.avances || {}).forEach(function (k) { var i = k.lastIndexOf("_"); if (k.slice(0, i) === date) h += '<div class="note info">' + esc(shortName(k.slice(i + 1))) + " a été avancée au " + esc(fmtLong(D.avances[k])) + ".</div>"; });
   h += fatigueBanner(date, types);
   types.forEach(function (t) { if (!isReplaced(date, t)) h += sessionSheet(date, t, w); });
   if (libreOf(date)) h += libreSheet(date);
@@ -605,24 +607,34 @@ function sessionSheet(date, type, w) {
   if (other) w = s.semaine || w;
   else if (isCompType(type)) w = weekOfProg(compProg(), date);
   if (def && def.kind === "course" && def.custom && def.plan && def.plan[w - 1] && def.plan[w - 1].lab && !s.plan) def = Object.assign({}, def, { name: def.plan[w - 1].lab });
-  if (s.arret && s.arret.motif) st = '<span class="state warn">Terminée plus tôt</span>';
-  else st = hasData(s) ? '<span class="state done">Notée</span>' : s.adapte && s.adapte.repos ? '<span class="state alt">Repos</span>' : s.adapte ? '<span class="state alt">Adaptée</span>' : '<span class="state">À faire</span>';
-  var h = '<section class="sheet"><div class="sheet-head"><h2>' + esc(s.plan ? s.plan.name : other || !sessionDef(type) || def.custom ? def.name || type : sessionName(type, date)) + "</h2>" + (def.kind === "repos" ? "" : st) + "</div>";
-  if (def.kind === "muscu" && !hasData(s) && !libreOf(date)) h += '<div class="note info stack"><p><b>Pas à ta salle aujourd\'hui ?</b> Compose une séance avec le matériel que tu as sous la main.</p><div><button type="button" class="btn primary small" data-act="librestart" data-t="' + esc(type) + '">Faire une séance libre</button></div></div>';
-  if (s.adapte && def.kind !== "course" && (s.adapte.repos || def.kind === "sport")) return h + adapteNote(s, id) + "</section>";
+  var smk = smodKind(date, type, def, s), ld = def.kind === "muscu" && !s.plan && !hasData(s) && !s.garderSeries && lendemainDur(date);
+  if (s.smod && s.smod.statut) st = smodState(s);
+  else if (s.arret && s.arret.motif) st = '<span class="state warn">Terminée plus tôt</span>';
+  else st = hasData(s) ? '<span class="state done">Notée</span>' : ld ? '<span class="state alt">Adaptée</span>' : s.adapte && s.adapte.repos ? '<span class="state alt">Repos</span>' : s.adapte ? '<span class="state alt">Adaptée</span>' : '<span class="state">À faire</span>';
+  var h = '<section class="sheet" id="sess-' + esc(id) + '"><div class="sheet-head"><h2>' + esc(s.plan ? s.plan.name : other || !sessionDef(type) || def.custom ? def.name || type : sessionName(type, date)) + "</h2>" + (def.kind === "repos" ? "" : st) + "</div>";
+  if (s.pour) h += '<p class="small muted">' + (s.avanceDe ? "Avancée du " + esc(fmtLong(s.avanceDe)) + ", à la place de « " : "À la place de « ") + esc(shortName(s.pour)) + " ».</p>";
+  var smOpen = smk && ((s.smod && s.smod.statut) || (S.smodOpen && S.smodOpen[id]));
+  CK = smk ? { kind: def.kind, name: def.name, id: id, smod: !smOpen && !hasData(s) } : null;
+  if (smOpen) { var ckh = (def.kind === "tests" || def.kind === "mensu") ? "" : checkin(s, id); CK = null; return h + ckh + '<div data-smod="' + esc(id) + '">' + smodPanel(date, type, def, s, id) + "</div></section>"; }
+  if (smk && !hasData(s) && (def.kind === "tests" || def.kind === "mensu")) h += smodBtn(id);
+  if (def.kind === "muscu" && !hasData(s) && !libreOf(date) && !s.pour) h += '<div class="note info stack"><p><b>Pas à ta salle aujourd\'hui ?</b> Compose une séance avec le matériel que tu as sous la main.</p><div><button type="button" class="btn primary small" data-act="librestart" data-t="' + esc(type) + '">Faire une séance libre</button></div></div>';
+  if (s.adapte && def.kind !== "course" && (s.adapte.repos || def.kind === "sport")) { CK = null; return h + adapteNote(s, id) + "</section>"; }
   if (def.kind === "muscu") h += adapteNote(s, id) + bodyMuscu(date, def, w, s, id);
   else if (def.kind === "course") h += courseSession(date, def, w, s, id);
   else if (def.kind === "sport") h += bodySport(def, s, id);
   else if (def.kind === "repos") h += bodyRepos(def, s, id);
   else if (def.kind === "tests") h += bodyTests(def, s, id);
   else if (def.kind === "mensu") h += bodyMensu(s, id);
+  CK = null;
   return h + "</section>";
 }
 function checkin(s, id) {
   var c = s.checkin || {}, h = '<div class="section"><h3>Avant de commencer</h3><p class="small muted">Note chaque point de 1 à 5 : 5, c\'est au mieux.</p>';
   CHECK.forEach(function (q) { h += scaleQ(id, "checkin." + q.k, q.label, q.lo, q.hi, c[q.k]); if (q.k === "sommeil") h += '<p class="tiny muted">Les heures se notent en haut, dans « Ce matin » ; ici, la qualité du sommeil.</p>'; });
-  var r = readiness(c);
-  if (r) h += '<div class="note ' + r.level + '"><b>' + r.title + " (" + fmt(r.avg, 1) + " sur 5).</b> " + r.text + "</div>";
+  var ctx = CK && CK.id === id ? CK : null, r = readinessFor(readiness(c), ctx);
+  if (r && ctx && ctx.smod && r.level === "stop") h += '<div class="note stop stack"><p><b>' + r.title + " (" + fmt(r.avg, 1) + " sur 5).</b> " + r.text + "</p>" + smodBtn(id, "primary") + "</div>";
+  else if (r) h += '<div class="note ' + r.level + '"><b>' + r.title + " (" + fmt(r.avg, 1) + " sur 5).</b> " + r.text + "</div>";
+  if (ctx && ctx.smod && !(r && r.level === "stop")) h += smodBtn(id);
   return h + "</div>";
 }
 function setRows(id, base, rows, n, o) {
@@ -641,13 +653,16 @@ function setRows(id, base, rows, n, o) {
 function bodyMuscu(date, def, w, s, id) {
   var h = "";
   if (s.arret && s.arret.motif) h += '<div class="note warn"><b>Séance terminée plus tôt</b> (' + esc(motifLabel(MOTIFS_ARRET, s.arret.motif)) + "). Les exercices non notés comptent comme non faits.</div>";
+  var ld = !s.plan && !hasData(s) && !s.garderSeries && lendemainDur(date), ldOff = !s.plan && !hasData(s) && s.garderSeries && lendemainDur(date);
+  if (ld) h += '<div class="note info stack"><p><b>' + esc(ld.name) + " très dur hier.</b> " + esc(ld.texte || "Règle de ton programme : une série de moins par exercice, mêmes charges.") + '</p><div><button type="button" class="linkbtn" data-act="toggle" data-col="seances" data-id="' + esc(id) + '" data-path="garderSeries">Garder toutes les séries</button></div></div>';
+  else if (ldOff) h += '<div class="note info stack"><p>Toutes les séries gardées malgré la séance très dure d\'hier.</p><div><button type="button" class="linkbtn" data-act="toggle" data-col="seances" data-id="' + esc(id) + '" data-path="garderSeries">Appliquer la règle : une série de moins</button></div></div>';
   h += checkin(s, id);
   var r = readiness(s.checkin), light = r && r.level === "stop";
   h += '<div class="hr"></div><div class="section"><h3>Exercices</h3><p class="small muted">Note pour chaque série la charge, les répétitions faites et ton RIR ressenti (répétitions que tu aurais encore pu faire). « = prévu » remplit la série avec la cible.</p></div>';
   var items = s.plan ? s.plan.ex.map(function (x) { return { e: x, p: x.p }; }) : def.ex.map(function (e) { return { e: e, p: presc(e, w) }; });
   items.forEach(function (it) {
     var e = it.e, p = it.p; if (!p) return;
-    var ad = s.adapte || {}, sg = suggestion(e, p, date), planned = Math.max(1, p.sets - (light || ad.court ? 1 : 0));
+    var ad = s.adapte || {}, sg = suggestion(e, p, date), planned = Math.max(1, p.sets - (light || ad.court || ld ? 1 : 0));
     var rows = (s.sets && s.sets[e.id]) || {}, has = rowsOk(rows).length > 0, n = Math.max(planned, keysOf(rows).length);
     var rirT = (light ? p.rirN + 1 : p.rirN) + (ad.facile ? 2 : 0), mod = (s.mods || {})[e.id];
     var tag = mod ? (mod.statut === "saute" ? '<span class="state warn">Sauté</span>' : '<span class="state alt">Remplacé</span>') : (e.ss ? '<span class="ss">' + esc(e.ss) + "</span>" : "");
@@ -793,7 +808,7 @@ function libreSheet(date) {
   return h + "</section>";
 }
 function libreEx(s, id, it, i, date) {
-  var c = CAT[it.k] || null, time = !!(c && c.time), rows = (s.sets && s.sets[it.u]) || {}, n = Math.max(time ? 2 : 3, keysOf(rows).length), name = libreName(it);
+  var c = CAT[it.k] || null, time = !!(c && c.time), rows = (s.sets && s.sets[it.u]) || {}, n = Math.max(parseInt(it.cible, 10) || (time ? 2 : 3), keysOf(rows).length), name = libreName(it);
   var h = '<div class="ex" id="ex-' + esc(it.u) + '"><div class="ex-title"><h3><span class="ex-code">' + (i + 1) + "</span>" + esc(name) + '</h3><button type="button" class="icon-btn" data-act="librerm" data-id="' + esc(id) + '" data-u="' + esc(it.u) + '" aria-label="Retirer ' + esc(name) + ' de la séance">' + ICON_X + "</button></div>";
   if (it.k === "autre") h += '<label class="field"><span>Nom de l\'exercice</span>' + inp("seances", id, "liste." + i + ".nom", it.nom, 'placeholder="ex. Rotation externe à l\'élastique"') + "</label>" +
     '<div class="scale"><div class="scale-q"><span>Muscle travaillé</span></div>' + seg("seances", id, "liste." + i + ".mu", MUSCLES.map(function (m) { return { v: m[0], l: m[1] }; }), it.mu) + "</div>" +
@@ -801,6 +816,7 @@ function libreEx(s, id, it, i, date) {
   var last = it.k === "autre" ? (it.nom ? lastAutre(it.nom, date) : null) : c ? lastCat(it.k, date) : null;
   h += '<p class="advice">' + (last ? "Dernière fois : " + esc(perfText(c, last.best)) + ' <span class="muted">(' + esc(fmtShort(last.date)) + (last.salle ? ", à la salle" : "") + ")</span>"
     : time ? "Première fois : note la durée tenue et la marge qu'il te restait." : "Première fois sur cet exercice : choisis une charge qui laisse 2 répétitions en réserve.") + "</p>";
+  if (it.cible) h += '<p class="small">Prévu : ' + esc(it.cible) + (it.consigne ? ". " + esc(it.consigne) : "") + "</p>";
   h += libreRows(id, it.u, rows, n, c, last);
   if (c && c.bw) h += '<p class="tiny muted">Poids de corps : mets 0 dans Lest. ' + (c.bwf ? "Les deux tiers de ton poids du jour sont comptés" : "Ton poids du jour est compté") + " dans la force estimée.</p>";
   if (time) h += '<p class="tiny muted">Marge : combien de secondes tu aurais encore pu tenir, comme le RIR.</p>';
@@ -980,10 +996,10 @@ function courseSession(date, def, w, s, id) {
   return h + cardioBody(date, vs, id, ci) + '<div data-live="' + esc(id) + '" data-kind="alerta">' + alertAHtml(vs, id, ci) + "</div>";
 }
 function bodySport(def, s, id) {
-  var h = '<p class="small muted">Après la séance, note son intensité : elle sert à doser la séance du lendemain.</p>';
+  var h = (def.info ? '<p class="small muted">' + esc(def.info) + "</p>" : "") + checkin(s, id) + '<div class="hr"></div><p class="small muted">Après la séance, note son intensité : elle sert à doser la séance du lendemain.</p>';
   h += '<div class="scale"><div class="scale-q"><span>Intensité de la séance</span></div>' + seg("seances", id, "intensite", ["Légère", "Normale", "Très dure"], s.intensite) + "</div>";
   h += '<label class="field"><span>' + (def.custom ? "Minutes de travail intense" : "Minutes de combat ou de travail intense") + '</span>' + inp("seances", id, "combats", s.combats, 'inputmode="numeric" placeholder="ex. 25"') + "</label>";
-  h += '<label class="field"><span>Durée totale de la séance (min)</span>' + inp("seances", id, "duree", s.duree, 'inputmode="numeric" placeholder="ex. 90"') + "</label>";
+  h += '<label class="field"><span>Durée totale de la séance (min)</span>' + inp("seances", id, "duree", s.duree, 'inputmode="numeric" placeholder="ex. ' + (toNum(def.duree) || 90) + '"') + "</label>";
   return h + bilan(s, id, true, { charge: true });
 }
 function bodyRepos(def, s, id) {
@@ -1398,6 +1414,7 @@ function weekCharge(from, to) {
   var by = {}, tot = 0, miss = 0;
   inRange(from, to).forEach(function (s) {
     var c = loadCat(s); if (!c) return;
+    if (s.smod && s.smod.statut) { var Lm = smodLoad(s); if (!Lm) return; c = "sport"; var em = by[c] || (by[c] = { load: 0, n: 0, nTot: 0, min: 0 }); em.nTot++; em.load += Lm; em.n++; tot += Lm; return; }
     var e = by[c] || (by[c] = { load: 0, n: 0, nTot: 0, min: 0 }), L = sessLoad(s);
     e.nTot++;
     var z = cardioZones(s); if (z) e.min += z.dur;
@@ -1672,6 +1689,7 @@ function logItem(s) {
   if (r) chips.push('<span class="state ' + (r.level === "ok" ? "done" : "warn") + '">forme ' + fmt(r.avg, 1) + "</span>");
   if (b.rpe) chips.push('<span class="state">difficulté ' + b.rpe + "</span>");
   if (s.intensite) chips.push('<span class="state">' + esc(s.intensite.toLowerCase()) + "</span>");
+  if (s.smod && s.smod.statut) chips.push('<span class="state ' + (s.smod.statut === "saute" ? "warn" : "alt") + '">' + esc(smodText(s)) + "</span>");
   if (s.arret && s.arret.motif) chips.push('<span class="state warn">arrêtée, ' + esc(motifLabel(MOTIFS_ARRET, s.arret.motif)) + "</span>");
   if (s.mods && keysOf(s.mods).length) chips.push('<span class="state alt">' + keysOf(s.mods).length + " exercice" + (keysOf(s.mods).length > 1 ? "s" : "") + " changé" + (keysOf(s.mods).length > 1 ? "s" : "") + "</span>");
   var pains = b.douleurs ? keysOf(b.douleurs).filter(function (k) { return b.douleurs[k]; }) : [];
@@ -3195,7 +3213,7 @@ function compSheet() {
 
 /* ---------- Séances spéciales : test de 6 minutes, chrono, jour de course ---------- */
 function bodyTest6(date, s, id) {
-  var h = '<div class="target"><h3>Pourquoi ce test</h3><p class="small">Il mesure ta VMA, la vitesse que tu tiens environ 6 minutes. Les distances visées de tes fractionnés en découlent.</p></div>';
+  var h = checkin(s, id) + '<div class="hr"></div><div class="target"><h3>Pourquoi ce test</h3><p class="small">Il mesure ta VMA, la vitesse que tu tiens environ 6 minutes. Les distances visées de tes fractionnés en découlent.</p></div>';
   h += '<div class="section"><h3>Comment faire</h3><ol class="steps small"><li>Sur une piste ou un parcours plat et mesuré, de préférence.</li><li>15 min d\'échauffement facile, puis 3 accélérations de 20 s.</li><li>Cours 6 minutes à l\'allure la plus rapide que tu peux tenir jusqu\'au bout, sans partir trop vite.</li><li>Note la distance parcourue, puis 10 min de retour au calme en trottinant.</li></ol></div>';
   h += '<label class="field"><span>Distance parcourue en 6 minutes (m)</span>' + inp("seances", id, "distanceTest", s.distanceTest, 'inputmode="numeric" placeholder="ex. 1450"') + "</label>";
   var dist = toNum(s.distanceTest);
@@ -3204,7 +3222,7 @@ function bodyTest6(date, s, id) {
   return h + '<div class="hr"></div>' + arretBlock(s, id) + bilan(s, id, true, { duree: true, charge: true });
 }
 function bodyChrono(date, s, id, spec) {
-  var prog = D.programmes[s.programme] || (isCompType(s.type) ? compProg() : P), run = prog && prog.run, dist = toNum(spec.dist) || 5, c = s.chrono || {}, t = parseRaceTime(c.temps), h = "";
+  var prog = D.programmes[s.programme] || (isCompType(s.type) ? compProg() : P), run = prog && prog.run, dist = toNum(spec.dist) || 5, c = s.chrono || {}, t = parseRaceTime(c.temps), h = checkin(s, id) + '<div class="hr"></div>';
   if (spec.race) h += '<div class="target"><h3>Le jour J</h3><p class="small">Échauffe-toi 10 à 15 min, pars à ton allure visée sans t\'emballer sur le premier kilomètre, puis note ton temps officiel.' + (run && runObjOf(run) && runObjOf(run).t ? " Objectif : " + esc(fmtRace(runObjOf(run).t)) + ", soit " + esc(fmtPace(runObjOf(run).t / DISTKM[run.dist])) + "." : "") + "</p></div>";
   else h += '<div class="target"><h3>Pourquoi ce chrono</h3><p class="small">Il donne ton temps probable sur la distance visée, et permet d\'ajuster les allures des semaines suivantes.</p><ol class="steps small"><li>15 min d\'échauffement facile, puis 3 accélérations de 20 s.</li><li>' + fmt(dist, 0) + " km le plus vite possible en restant régulier, sur un parcours plat.</li><li>Note ton temps, puis 10 min de retour au calme.</li></ol></div>";
   h += '<div class="grid2"><label class="field"><span>' + (spec.race ? "Temps officiel" : "Temps") + "</span>" + inp("seances", id, "chrono.temps", c.temps, 'placeholder="ex. 24:40 ou 1:52:30"') + '</label><label class="field"><span>Distance</span><input type="text" value="' + esc(fmt(dist, dist % 1 ? 3 : 0) + " km") + '" disabled></label></div>';
@@ -3369,6 +3387,166 @@ function alertesSheet() {
     '<p class="tiny muted">Normale : questionnaire 0,5 point sous ta moyenne 2 séances de suite, nuits 45 min plus courtes que d\'habitude, ou même douleur 2 fois en 7 jours. Ces seuils sont des choix de l\'application : aucune étude ne les fixe.</p></section>';
 }
 
+/* ================= Séance sautée ou remplacée, questionnaire pour toutes les séances ================= */
+var MOTIFS_SMOD = [{ v: "fatigue", l: "Fatigue" }, { v: "douleur", l: "Douleur" }, { v: "temps", l: "Manque de temps" }, { v: "imprevu", l: "Imprévu" }, { v: "autre", l: "Autre" }];
+var INTENS_RPE = { "Légère": 3, "Normale": 5, "Très dure": 8 };
+var CK = null; /* séance en cours d'affichage, pour le questionnaire */
+function isCombat(name) { return /sambo|judo|lutte|jjb|jiu|grappling|boxe|mma|karat|taekwondo|kick|muay|combat/i.test(name || ""); }
+function readinessFor(r, ctx) {
+  if (!r || !ctx || ctx.kind === "muscu") return r;
+  var o = Object.assign({}, r), comb = ctx.kind === "sport" && isCombat(ctx.name);
+  if (r.level === "ok") o.text = "Séance normale.";
+  else if (r.level === "warn") o.text = ctx.kind === "course" ? "Garde l'allure prévue, sans forcer sur la fin." : comb ? "Écoute-toi pendant les combats : tu peux en faire moins." : "Écoute-toi pendant la séance : tu peux lever le pied.";
+  else { o.title = "Forme basse"; o.text = (ctx.kind === "course" ? "Conseil : endurance facile ou repos aujourd'hui." : comb ? "Conseil pour cette séance : technique sans combats, ou repos." : "Conseil : séance légère ou repos.") + " C'est un conseil : tu choisis."; }
+  return o;
+}
+/* La séance peut-elle être sautée ou remplacée ? */
+function smodKind(date, type, def, s) {
+  if (!def || type === "REPOS" || def.kind === "repos" || type === LIBRE || isCardioType(type)) return null;
+  if (def.kind === "tests" || def.kind === "mensu") return "saute";
+  if (def.kind === "course") { var ci = cardioInfo(s && s.type ? s : { date: date, type: type, programme: progIdFor(type, date), semaine: null }); if (ci && ci.spec && ci.spec.chrono && ci.spec.chrono.race) return "saute"; }
+  return "both";
+}
+function smodBtn(id, cls) { return '<div><button type="button" class="btn small ' + (cls || "quiet") + '" data-act="smodopen" data-id="' + esc(id) + '">' + (cls ? "Sauter ou remplacer la séance" : "Séance sautée ou remplacée") + "</button></div>"; }
+function progOfType(type) { return isCompType(type) ? compProg() : P; }
+function weekDates(date) { var mon = mondayOfDate(date), out = []; for (var i = 0; i < 7; i++) out.push(addDays(mon, i)); return out; }
+function smodProgOptions(date, type) {
+  var prog = progOfType(type); if (!prog) return [];
+  var today = plannedFor(date) || [], days = weekDates(date);
+  return keysOf(prog.sessions).filter(function (t) {
+    var d = prog.sessions[t]; return t !== type && d && (d.kind === "muscu" || d.kind === "course" || d.kind === "sport") && today.indexOf(t) < 0 && !(seance(date, t) && (hasData(seance(date, t)) || seance(date, t).ajoutee));
+  }).map(function (t) {
+    var info = "", later = null;
+    days.forEach(function (dd) {
+      if (dd < date && (hasData(seance(dd, t)) || replacedDone(dd, t))) info = "faite " + fmtLong(dd).replace(/^(\S+) (\d+) .*$/, "$1 $2");
+      if (dd > date && !later && (plannedFor(dd) || []).indexOf(t) >= 0 && !hasData(seance(dd, t))) later = dd;
+    });
+    var d = prog.sessions[t], n = d.kind === "muscu" ? (d.ex || []).length + " exercices" : d.kind === "course" ? "Course" : "Sport";
+    if (later) info = "prévue " + fmtLong(later).replace(/^(\S+) (\d+) .*$/, "$1 $2");
+    return { t: t, label: d.name, sub: n + (info ? " · " + info : ""), later: later };
+  });
+}
+function smodPanel(date, type, def, s, id) {
+  var m = s.smod || {}, k = smodKind(date, type, def, s), nm = def.short || def.name, h = '<div class="panel">';
+  h += '<div class="scale"><div class="scale-q"><span>Que s\'est-il passé ?</span></div>' + seg("seances", id, "smod.statut", k === "both" ? [{ v: "saute", l: "Sautée" }, { v: "remplace", l: "Remplacée par autre chose" }] : [{ v: "saute", l: "Sautée" }], m.statut) + "</div>";
+  h += '<div class="scale"><div class="scale-q"><span>Pourquoi ?</span></div>' + seg("seances", id, "smod.motif", MOTIFS_SMOD, m.motif) + "</div>";
+  if (m.motif === "douleur") h += '<div class="scale"><div class="scale-q"><span>Où ?</span></div>' + zones(id, "smod.zone", m.zone) + "</div>";
+  if (m.motif === "autre") h += '<label class="field"><span>Précise</span>' + inp("seances", id, "smod.precision", m.precision, "") + "</label>";
+  if (m.statut === "saute") h += '<p class="small muted">' + (def.kind === "tests" ? "Les tests servent à calculer le bloc suivant : fais-les un autre jour avec « Ajouter une séance à ce jour »." : def.kind === "mensu" ? "Tu pourras les noter un autre jour avec « Ajouter une séance à ce jour »." : "Elle compte comme sautée dans ta semaine. Ton programme ne bouge pas : la séance suivante reste prévue.") + "</p>";
+  if (m.statut === "remplace") h += smodRemp(date, type, def, s, id, nm);
+  h += '<div><button type="button" class="linkbtn" data-act="smodundo" data-id="' + esc(id) + '">Revenir à la séance prévue</button></div>';
+  return h + "</div>";
+}
+function smodRemp(date, type, def, s, id, nm) {
+  var par = s.smod.par || {}, h = "";
+  if (par.k === "prog" && par.started) {
+    var d2 = sessionDef(par.t);
+    return '<div class="note info">Remplacée par <b>' + esc(d2 ? d2.name : par.t) + "</b>" + (par.from ? ", avancée du " + esc(fmtLong(par.from)) : "") + " : la séance est plus bas.</div>";
+  }
+  if (par.k === "pret" && par.ref && D.seances[seanceId(date, par.ref)]) return '<div class="note info">Remplacée par <b>' + esc(par.nom) + "</b> : la séance est plus bas.</div>";
+  h += '<div class="scale"><div class="scale-q"><span>Par quoi ?</span></div>';
+  var opts = smodProgOptions(date, type);
+  if (opts.length) {
+    h += '<p class="small"><b>Dans ton programme</b></p><div class="seg stack" role="group">' + opts.map(function (o) {
+      return '<button type="button" data-act="smodprog" data-id="' + esc(id) + '" data-t="' + esc(o.t) + '" aria-pressed="' + (par.k === "prog" && par.t === o.t) + '"><b>' + esc(o.label) + '</b><span class="tiny sub">' + esc(o.sub) + "</span></button>";
+    }).join("") + "</div>";
+  }
+  h += "</div>";
+  if (par.k === "prog" && par.t) {
+    var o = opts.filter(function (x) { return x.t === par.t; })[0], d3 = sessionDef(par.t), sh = d3 ? d3.short || d3.name : par.t;
+    if (o && o.later) h += '<div class="scale"><div class="scale-q"><span>' + esc(sh) + " était prévue " + esc(fmtLong(o.later)) + '</span></div><div class="seg stack" role="group">' +
+      [["avance", "L'avancer à aujourd'hui : ce jour-là devient libre"], ["plus", "La faire en plus : ce jour-là ne change pas"]].map(function (x) { return '<button type="button" data-act="smodmode" data-id="' + esc(id) + '" data-v="' + x[0] + '" aria-pressed="' + ((par.mode || "avance") === x[0]) + '">' + esc(x[1]) + "</button>"; }).join("") + "</div></div>";
+    h += '<button type="button" class="btn primary wide" data-act="smodgo" data-id="' + esc(id) + '">Commencer ' + esc(sh) + "</button>";
+  }
+  h += '<div class="hr"></div><p class="small"><b>Ou une séance prête de l\'application</b></p><p class="small muted">Full body, haut et bas, push pull legs, selon ton matériel ; récupération active, endurance ou fractionné en course, vélo ou natation.</p>' +
+    '<div><button type="button" class="btn" data-act="smodpret" data-id="' + esc(id) + '">Choisir une séance prête</button></div>';
+  h += '<div class="hr"></div><p class="small"><b>Ou autre chose</b></p><div class="seg" role="group">' + [["mob", "Mobilité, étirements"], ["sport", "Autre sport"]].map(function (x) { return '<button type="button" data-act="smodautre" data-id="' + esc(id) + '" data-v="' + x[0] + '" aria-pressed="' + (par.k === x[0]) + '">' + esc(x[1]) + "</button>"; }).join("") + "</div>";
+  if (par.k === "mob" || par.k === "sport") {
+    if (par.k === "sport") h += '<label class="field"><span>Quel sport ?</span>' + inp("seances", id, "smod.par.nom", par.nom, 'placeholder="ex. Foot, natation, vélo"') + "</label>";
+    h += '<label class="field"><span>Durée (min)</span>' + inp("seances", id, "smod.par.duree", par.duree, 'inputmode="numeric" placeholder="ex. 30"') + "</label>";
+    h += '<div class="scale"><div class="scale-q"><span>Intensité</span></div>' + seg("seances", id, "smod.par.intensite", ["Légère", "Normale", "Très dure"], par.intensite) + "</div>";
+  }
+  return h + '<p class="small muted">La séance de remplacement compte dans ta semaine et ta charge, à la place de « ' + esc(nm) + " ».</p>";
+}
+function smodState(s) { return s.smod && s.smod.statut === "saute" ? '<span class="state warn">Sautée</span>' : s.smod && s.smod.statut === "remplace" ? '<span class="state alt">Remplacée</span>' : ""; }
+function smodText(s) {
+  var m = s.smod; if (!m || !m.statut) return "";
+  var p = m.par || {}, t = m.statut === "saute" ? "sautée" : "remplacée" + (p.k === "prog" ? " par " + shortName(p.t) + (p.from ? " (avancée du " + fmtShort(p.from) + ")" : "") : p.k === "pret" ? " par " + (p.nom || "une séance prête") : p.k === "mob" ? " par mobilité et étirements" : p.k === "sport" ? " par " + (p.nom || "un autre sport") : "");
+  if (p.duree && (p.k === "mob" || p.k === "sport")) t += ", " + p.duree + " min" + (p.intensite ? ", " + p.intensite.toLowerCase() : "");
+  if (m.motif) t += " (" + motifLabel(MOTIFS_SMOD, m.motif) + (m.zone ? " : " + keysOf(m.zone).filter(function (k) { return m.zone[k]; }).map(labelZone).join("/") : "") + (m.precision ? ", " + m.precision : "") + ")";
+  return t;
+}
+function smodLoad(s) { var p = s.smod && s.smod.statut === "remplace" && s.smod.par; if (!p || (p.k !== "mob" && p.k !== "sport")) return null; var d = toNum(p.duree), r = INTENS_RPE[p.intensite]; return d && r ? d * r : null; }
+function smodCleanup(date, s) {
+  var p = s.smod && s.smod.par; if (!p) return;
+  if (p.k === "prog" && p.t) {
+    var x = seance(date, p.t);
+    if (x && !hasData(x) && x.pour) delete D.seances[seanceId(date, p.t)];
+    if (!(x && hasData(x)) && p.from && D.avances) delete D.avances[p.from + "_" + p.t];
+  }
+  if (p.k === "pret" && p.ref) { var y = D.seances[seanceId(date, p.ref)]; if (y && !hasData(y)) delete D.seances[seanceId(date, p.ref)]; }
+}
+/* Règle du programme : lendemain d'une séance de sport très dure, une série de moins */
+function lendemainDur(date) {
+  var r = P && P.regles && P.regles.lendemainDur; if (!r) return null;
+  var y = addDays(date, -1), found = null;
+  (r.types || []).forEach(function (t) { var x = seance(y, t); if (x && x.intensite === "Très dure") found = sessionDef(t); });
+  return found ? { name: found.short || found.name, texte: r.texte } : null;
+}
+function smodPretDialog(date, type, id) {
+  var st = { mat: (D.vue && D.vue.matPret) || "salle", sport: (sportsOn()[0] || SPORTS[0]).v };
+  function draw() {
+    var h = '<h2 id="dlg-t">Choisir une séance prête</h2><div class="scale"><div class="scale-q"><span>Ton matériel</span></div><div class="seg" role="group">' + MATS.map(function (m) { return '<button type="button" data-sh="mat" data-v="' + m.v + '" aria-pressed="' + (st.mat === m.v) + '">' + esc(m.l) + "</button>"; }).join("") + "</div></div>";
+    h += '<p class="grp-t">Musculation</p><div class="pick-list">';
+    ["fb", "hb", "ppl"].forEach(function (org) { ((MODELES[st.mat] || {})[org] || []).forEach(function (tp, i) {
+      var ex = tp[1], names = ex.slice(0, 3).map(function (x) { return CAT[x.k] ? CAT[x.k].n.toLowerCase() : x.k; }).join(" / ");
+      h += '<button type="button" class="pick" data-sh="tpl" data-org="' + org + '" data-i="' + i + '"><span><b>' + esc(tp[0]) + '</b><span class="small muted">' + ex.length + " exercices · " + esc(names) + '</span></span><span class="chev" aria-hidden="true">›</span></button>';
+    }); });
+    h += '</div><p class="grp-t">Cardio</p><div class="seg" role="group">' + sportsOn().map(function (o) { return '<button type="button" data-sh="sport" data-v="' + o.v + '" aria-pressed="' + (st.sport === o.v) + '">' + esc(o.l) + "</button>"; }).join("") + '</div><div class="pick-list">';
+    CTYPES.forEach(function (c) { h += '<button type="button" class="pick" data-sh="ctype" data-v="' + c.v + '"><span><b>' + esc(c.l) + '</b><span class="small muted">' + esc(c.d) + '</span></span><span class="chev" aria-hidden="true">›</span></button>'; });
+    return h + '</div><div><button type="button" class="btn wide" data-sh="cancel">Annuler</button></div>';
+  }
+  openSheet(draw(), function (b, close, back) {
+    var a = b.dataset.sh, s = seance(date, type, true);
+    if (a === "mat" || a === "sport") { st[a] = b.dataset.v; if (a === "mat") { D.vue.matPret = st.mat; persist(); } back.querySelector(".dialog").innerHTML = draw(); var f = back.querySelector('[data-sh="' + a + '"][data-v="' + b.dataset.v + '"]'); if (f) f.focus(); return; }
+    if (a === "cancel") { close(); return; }
+    if (a === "tpl") {
+      var tp = MODELES[st.mat][b.dataset.org][Number(b.dataset.i)], cur = libreOf(date);
+      if (cur && hasData(cur)) { close(); dialog("Une séance libre existe déjà", '<p class="small">Tu as déjà noté une séance libre aujourd\'hui. Ajoute les exercices dedans, ou choisis une séance de cardio.</p>', [{ label: "OK", cls: "primary" }]); return; }
+      close();
+      var L = seance(date, LIBRE, true); L.libre = true; L.lieu = st.mat === "salle" ? "salle" : st.mat === "street" ? "dehors" : "maison"; L.modele = tp[0]; L.nU = 0; L.liste = [];
+      tp[1].forEach(function (x) { L.nU++; var it = { u: "lx" + L.nU, k: x.k, cible: x.s + " × " + x.r }; if (x.note) it.consigne = x.note; L.liste.push(it); });
+      s.smod.par = { k: "pret", nom: tp[0], ref: LIBRE };
+    } else if (a === "ctype") {
+      close();
+      var n = 1; cardioOf(date).forEach(function (x) { n = Math.max(n, Number(x.type.slice(6)) + 1); });
+      var c = seance(date, "CARDIO" + n, true); c.cardio = 1; c.sport = st.sport; c.ctype = b.dataset.v;
+      s.smod.par = { k: "pret", nom: listLabel(CTYPES, b.dataset.v) + " (" + listLabel(SPORTS, st.sport).toLowerCase() + ")", ref: "CARDIO" + n };
+    } else return;
+    persist(); render();
+    var el = document.getElementById(s.smod.par.ref === LIBRE ? "libre" : "c-" + s.smod.par.ref); if (el) el.scrollIntoView({ block: "start" });
+  }, true);
+}
+function smodAct(b) {
+  var id = b.dataset.id, s = D.seances[id] || null, a = b.dataset.act, us = id.lastIndexOf("_"), date = id.slice(0, us), type = id.slice(us + 1);
+  if (a === "smodopen") { S.smodOpen = S.smodOpen || {}; S.smodOpen[id] = true; render(); var p = document.querySelector('[data-smod="' + id + '"]'); if (p) p.scrollIntoView({ block: "nearest" }); return; }
+  if (a === "smodundo") { if (s) { smodCleanup(date, s); delete s.smod; } if (S.smodOpen) delete S.smodOpen[id]; persist(); render(); return; }
+  s = seance(date, type, true); s.smod = s.smod || { statut: "remplace" }; s.smod.statut = "remplace";
+  if (a === "smodprog") { var keep = s.smod.par && s.smod.par.k === "prog" && s.smod.par.t === b.dataset.t; if (!keep) { smodCleanup(date, s); s.smod.par = { k: "prog", t: b.dataset.t, mode: "avance" }; } }
+  else if (a === "smodmode") s.smod.par.mode = b.dataset.v;
+  else if (a === "smodautre") { if (!(s.smod.par && s.smod.par.k === b.dataset.v)) { smodCleanup(date, s); s.smod.par = { k: b.dataset.v }; } }
+  else if (a === "smodpret") { smodCleanup(date, s); s.smod.par = {}; persist(); smodPretDialog(date, type, id); return; }
+  else if (a === "smodgo") {
+    var par = s.smod.par, o = smodProgOptions(date, type).filter(function (x) { return x.t === par.t; })[0];
+    var x = seance(date, par.t, true); x.ajoutee = true; x.pour = type;
+    if (o && o.later && (par.mode || "avance") === "avance") { D.avances = D.avances || {}; D.avances[o.later + "_" + par.t] = date; par.from = o.later; x.avanceDe = o.later; }
+    par.started = true; persist(); render();
+    var el = document.getElementById("sess-" + seanceId(date, par.t)); if (el) el.scrollIntoView({ block: "start" });
+    return;
+  }
+  persist(); render();
+}
+
 /* ================= Claude (sans API) ================= */
 function claudeSheet(where) {
   var h = '<section class="sheet"><h2>Demander à Claude</h2><p class="small muted">Le carnet prépare un texte avec ton programme, tes 3 dernières semaines et ta question. Il le copie, puis ouvre Claude : colle-le si la question n\'apparaît pas. Il faut un compte Claude, même gratuit. Rien n\'est envoyé sans que tu le colles toi-même.</p><div class="row">' +
@@ -3397,6 +3575,7 @@ function summarize(s) {
     parts.push(t);
   });
   if (s.arret && s.arret.motif) parts.push("séance terminée plus tôt : " + motifLabel(MOTIFS_ARRET, s.arret.motif) + (s.arret.zone ? " (" + keysOf(s.arret.zone).map(labelZone).join("/") + ")" : "") + (s.arret.intensite ? ", douleur " + s.arret.intensite + "/10" : "") + (s.arret.note ? ", " + s.arret.note : ""));
+  if (s.smod && s.smod.statut) parts.push("séance " + smodText(s));
   if (s.intensite) parts.push("intensité " + s.intensite.toLowerCase() + (s.combats ? ", " + s.combats + " min de combat" : ""));
   if (s.duree && !cNew) parts.push(s.duree + " min" + (s.distance ? ", " + s.distance + " km" : "") + (s.allures ? ", allures tenues : " + s.allures.toLowerCase() : ""));
   if (s.distanceTest) parts.push("test 6 min : " + s.distanceTest + " m");
@@ -3553,6 +3732,7 @@ function onAct(ev) {
     case "today": S.date = initialDate(); S.stripMon = null; S.prompt = ""; render(); break;
     case "stripweek": stripWeek(Number(b.dataset.d)); break;
     case "menu": openMenu(); break;
+    case "smodopen": case "smodundo": case "smodprog": case "smodmode": case "smodautre": case "smodpret": case "smodgo": smodAct(b); break;
     case "view": D.astuceVue = true; persist(); if (b.dataset.v === "reglages") { openMenu(b.dataset.r); break; } S.view = b.dataset.v; render(); window.scrollTo(0, 0); break;
     case "week": S.mon = addDays(S.mon, 7 * Number(b.dataset.d)); render(); break;
     case "sansprog": D.sansProgramme = true; persistNow(); S.date = todayStr(); S.mon = mondayOfDate(S.date); S.view = "jour"; render(); window.scrollTo(0, 0); break;
@@ -3677,11 +3857,11 @@ function onChange(ev) {
     if (/^run\./.test(el.dataset.path)) { var rr = S.ed.d.run; if (el.dataset.path === "run.libre") { rr.obj = el.value.trim() ? "libre" : rr.obj === "libre" ? RUNOBJ[rr.dist][0].k : rr.obj; rr.garder = false; } if (el.dataset.path === "run.date") rr.weeks = ""; rr.force = false; regenRun(S.ed.d); saveDraft(S.ed.d); render(); return; }
     saveDraft(S.ed.d); edLive(); return;
   }
-  if (el.dataset.path && (/\.nom$/.test(el.dataset.path) || el.dataset.path === "chrono.temps" || (el.dataset.path === "distanceTest" && el.dataset.col === "seances"))) render();
+  if (el.dataset.path && ((/\.nom$/.test(el.dataset.path) && !/^smod\./.test(el.dataset.path)) || el.dataset.path === "chrono.temps" || (el.dataset.path === "distanceTest" && el.dataset.col === "seances"))) render();
 }
 app.addEventListener("change", onChange);
 
-var NUMERIC = /\.(c|r|rir|t|m)$|^kg$|^duree$|^distance$|^distanceTest$|^combats$|^footing$|^sommeil$|^tests\.|^mensu\.|^age$|^fcmax$|^fcrepos$|^deniv$|^fcMoy$|^fcMax$|^puiss$|^distTot$|^reps\.\d+\.\d+\.(d|p|v|fc)$|^fmt\.(effort|recup|reps|series|entre|echauf|calme)$/;
+var NUMERIC = /\.(c|r|rir|t|m)$|^kg$|^duree$|^smod\.par\.duree$|^distance$|^distanceTest$|^combats$|^footing$|^sommeil$|^tests\.|^mensu\.|^age$|^fcmax$|^fcrepos$|^deniv$|^fcMoy$|^fcMax$|^puiss$|^distTot$|^reps\.\d+\.\d+\.(d|p|v|fc)$|^fmt\.(effort|recup|reps|series|entre|echauf|calme)$/;
 function onInput(ev) {
   var el = ev.target; if (!el.dataset || !el.dataset.path) return;
   if (el.dataset.col === "ed") { edInput(el); return; }

@@ -447,3 +447,14 @@ body.menu-open { overflow: hidden; }
 @keyframes slidein { from { transform: translateX(-100%); } to { transform: none; } }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .drawer-back.opening, .drawer-back.opening .drawer { animation: none; } .tw::before { transition: none; } }
+
+/* ---------- Séance sautée ou remplacée ---------- */
+.seg.stack button b { font-weight: 650; display: block; }
+.seg.stack button .sub { display: block; color: var(--steel); }
+.seg button[aria-pressed="true"] .sub { color: inherit; opacity: .8; }
+.grp-t { margin-top: 4px; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--steel); }
+.pick-list { display: grid; border-top: 1px solid var(--rule); }
+.pick { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; padding: 10px 2px; border: 0; border-bottom: 1px solid var(--rule); background: none; text-align: left; cursor: pointer; }
+.pick b { display: block; font-weight: 650; }
+.pick .small { display: block; }
+.pick .chev { color: var(--steel); font-size: 20px; }
