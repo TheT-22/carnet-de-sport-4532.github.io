@@ -406,3 +406,8 @@ details summary { cursor: pointer; color: var(--plate); font-weight: 600; paddin
 .chip .icon-btn { background: transparent; border: 0; }
 .morning .row.end { flex-wrap: nowrap; }
 .morning .stat { flex: 0 0 8.5rem; }
+.role.r-spe { background: var(--caution-soft); color: var(--caution); }
+.role.r-aff { background: var(--ok-soft); color: var(--ok); }
+button.ed-week { display: grid; gap: 4px; }
+button.ed-week .row { justify-content: flex-start; gap: 10px; }
+input[type="date"] { width: 100%; min-height: 48px; padding: 10px 12px; border-radius: var(--r-ctl); border: 1px solid var(--rule); background: var(--chalk); color: var(--ink); font: inherit; }
