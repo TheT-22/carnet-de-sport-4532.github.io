@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.8.0";
+var APP_VERSION = "1.9.0";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -421,23 +421,23 @@ function render() {
   applyTheme();
   renderMasthead();
   var tabs = document.getElementById("tabs");
-  tabs.classList.toggle("hidden", !P && !D.sansProgramme && S.view !== "reglages");
-  var tv = S.view === "editeur" ? "reglages" : S.view;
+  tabs.classList.toggle("hidden", !P && !D.sansProgramme);
+  var tv = S.view;
   Array.prototype.forEach.call(tabs.querySelectorAll(".tab"), function (t) { if (t.dataset.view === tv) t.setAttribute("aria-current", "page"); else t.removeAttribute("aria-current"); });
   var h;
-  if (S.view === "editeur" && !S.ed) S.view = "reglages";
+  if (S.view === "editeur" && !S.ed) S.view = S.menuBack || "jour";
   if (S.view === "editeur") h = viewEditeur();
-  else if (S.view === "reglages") h = viewReglages();
   else if (!P && !D.sansProgramme) h = viewWelcome();
   else if (S.view === "jour") h = viewJour();
   else if (S.view === "semaine") h = viewSemaine();
   else if (S.view === "progres") h = viewProgres();
-  else h = viewReglages();
+  else h = viewJour();
   if (S.updateReady) h = '<div class="note info row"><span class="grow">Une nouvelle version de l\'application est prête.</span><button type="button" class="btn small primary" data-act="update">Mettre à jour</button></div>' + h;
   app.innerHTML = h;
   Array.prototype.forEach.call(app.querySelectorAll("[data-w]"), function (el) { el.style.width = Math.min(100, Number(el.dataset.w)) + "%"; });
   Array.prototype.forEach.call(app.querySelectorAll("[data-l]"), function (el) { el.style.left = Math.min(100, Number(el.dataset.l)) + "%"; });
   window.scrollTo(0, y);
+  syncMenu();
 }
 function renderMasthead() {
   var m = document.getElementById("masthead"), h = '<div class="app-name"><span class="brand">' + (S.view === "editeur" ? "" : '<button type="button" class="menu-btn" id="menu-btn" data-act="menu" aria-label="Ouvrir le menu Réglages" aria-haspopup="dialog"><span class="burger" aria-hidden="true"><i></i><i></i><i></i></span></button>') + '<span>Carnet de musculation</span></span><span class="saved" id="saved">' + (storageOK ? "Enregistré" : "Stockage indisponible") + "</span></div>";
@@ -1937,26 +1937,25 @@ function reglCreer() {
   }).join("") + "</div>";
   return h + "</section>";
 }
-function viewReglages() {
-  var r = rubOf(S.rub) || rubOf("prog"), h = '<button type="button" class="back" data-act="menu">‹ Menu</button><h1>' + esc(r.t) + "</h1>", b = "";
-  switch (r.k) {
-    case "prog": b = reglProg(); break;
-    case "creer": b = reglCreer(); break;
-    case "profil": b = noH2(profilSheet()); break;
-    case "disc": b = noH2(sportsSheet()); break;
-    case "alertes": b = noH2(alertesSheet()); break;
-    case "courbes": b = noH2(courbesReglage()) || '<section class="sheet"><p class="small muted">Les exercices à suivre apparaissent ici après ta première séance de musculation notée.</p></section>'; break;
-    case "sauv": b = '<section class="sheet"><p class="small">Tes données ne sont que sur ce téléphone. Exporte une sauvegarde régulièrement, par exemple chaque dimanche, et garde-la dans Fichiers ou envoie-la-toi.</p>' +
+function rubBody(k) {
+  switch (k) {
+    case "prog": return reglProg();
+    case "creer": return reglCreer();
+    case "profil": return noH2(profilSheet());
+    case "disc": return noH2(sportsSheet());
+    case "alertes": return noH2(alertesSheet());
+    case "courbes": return noH2(courbesReglage()) || '<p class="small muted">Les exercices à suivre apparaissent ici après ta première séance de musculation notée.</p>';
+    case "sauv": return '<p class="small">Tes données ne sont que sur ce téléphone. Exporte une sauvegarde régulièrement, par exemple chaque dimanche, et garde-la dans Fichiers ou envoie-la-toi.</p>' +
       '<div class="row"><button type="button" class="btn primary" data-act="export">Exporter mes données</button></div>' +
-      '<label class="field" for="file-prog"><span>Restaurer une sauvegarde ou importer un fichier de programme</span><input type="file" id="file-prog" accept=".json,application/json" data-act="import-file"></label></section>'; break;
-    case "ecran": b = noH2(installHelp()) + (isStandalone ? '<p class="small muted">C\'est déjà fait : tu utilises l\'application installée.</p>' : ""); break;
-    case "donnees": b = noH2(privacyNote()); break;
-    case "effacer": b = '<section class="sheet"><p class="small">Supprime le programme et toutes les données de ce téléphone. Exporte une sauvegarde avant si tu veux les garder.</p><div><button type="button" class="btn danger" data-act="wipe">Effacer toutes mes données</button></div></section>'; break;
+      '<label class="field" for="file-prog"><span>Restaurer une sauvegarde ou importer un fichier de programme</span><input type="file" id="file-prog" accept=".json,application/json" data-act="import-file"></label>';
+    case "ecran": return noH2(installHelp()) + (isStandalone ? '<p class="small muted">C\'est déjà fait : tu utilises l\'application installée.</p>' : "");
+    case "donnees": return noH2(privacyNote());
+    case "effacer": return '<p class="small">Supprime le programme et toutes les données de ce téléphone. Exporte une sauvegarde avant si tu veux les garder.</p><div><button type="button" class="btn danger" data-act="wipe">Effacer toutes mes données</button></div>';
   }
-  return h + b;
+  return "";
 }
 
-/* ---------- Menu latéral et apparence ---------- */
+/* ---------- Menu latéral : Réglages dépliables (une rubrique ouverte à la fois) et apparence ---------- */
 var THEMES = [{ v: "auto", l: "Automatique" }, { v: "jour", l: "Jour" }, { v: "nuit", l: "Nuit" }];
 function themeOf() { var t = D.vue && D.vue.theme; return t === "jour" || t === "nuit" ? t : "auto"; }
 function applyTheme() {
@@ -1968,39 +1967,68 @@ function applyTheme() {
   });
 }
 function menuHtml() {
-  var t = themeOf(), h = '<aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="menu-t"><div class="drawer-head"><h2 id="menu-t">Réglages</h2><button type="button" class="icon-btn" data-m="close" aria-label="Fermer le menu"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13"></path></svg></button></div><div class="drawer-body">';
+  var t = themeOf(), open = rubOf(S.rub) ? S.rub : null;
+  var h = '<aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="menu-t"><div class="drawer-head"><h2 id="menu-t">Réglages</h2><button type="button" class="icon-btn" data-m="close" aria-label="Fermer le menu"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13"></path></svg></button></div><div class="drawer-body">';
   RUBS.forEach(function (r) {
     if (r.g) h += '<p class="grp">' + esc(r.g) + "</p>";
     if (r.k === "apparence") { h += '<div class="mi-app"><b id="app-t">Apparence</b><div class="seg" role="group" aria-labelledby="app-t">' + THEMES.map(function (x) { return '<button type="button" data-m="theme" data-v="' + x.v + '" aria-pressed="' + (t === x.v) + '">' + x.l + "</button>"; }).join("") + "</div></div>"; return; }
-    var d = r.d;
+    var d = r.d, op = open === r.k;
     if (r.k === "prog") d = P ? (P.titre || "Programme") + " · lien du coach" : "Coller le lien de ton coach";
     if (r.k === "creer") { var n = keysOf(D.brouillons || {}).length; if (n) d += " · " + n + " en préparation"; }
     if (r.k === "ecran" && isStandalone) d = "Application installée";
-    var cur = S.view === "reglages" && (rubOf(S.rub) || rubOf("prog")).k === r.k;
-    h += '<button type="button" class="mi' + (r.cls ? " " + r.cls : "") + '" data-m="rub" data-r="' + r.k + '"' + (cur ? ' aria-current="page"' : "") + '><span><b>' + esc(r.t) + '</b><span class="small">' + esc(d) + '</span></span><span class="chev" aria-hidden="true">›</span></button>';
+    h += '<div class="acc' + (op ? " open" : "") + (r.cls ? " " + r.cls : "") + '"><button type="button" class="acc-h" id="acc-' + r.k + '" data-m="acc" data-r="' + r.k + '" aria-expanded="' + op + '"' + (op ? ' aria-controls="accb-' + r.k + '"' : "") + '><span class="tw" aria-hidden="true"></span><span><b>' + esc(r.t) + "</b>" + (op ? "" : '<span class="small">' + esc(d) + "</span>") + "</span></button>" +
+      (op ? '<div class="acc-b" id="accb-' + r.k + '" role="region" aria-labelledby="acc-' + r.k + '">' + rubBody(r.k) + "</div>" : "") + "</div>";
   });
   return h + '<p class="ver">Version ' + APP_VERSION + (isStandalone ? ", application installée" : "") + ".</p></div></aside>";
 }
-function openMenu() {
-  var back = document.getElementById("drawer");
-  back.innerHTML = menuHtml(); back.hidden = false; document.body.classList.add("menu-open");
-  var c = back.querySelector("[data-m='close']"); if (c) c.focus();
+function drawerEl() { return document.getElementById("drawer"); }
+function fillMenu(keepFocus) {
+  var back = drawerEl(), dr = back.querySelector(".drawer"), top = dr ? dr.scrollTop : 0, a = document.activeElement, sel = null;
+  if (keepFocus && a && back.contains(a)) {
+    var ds = a.dataset || {};
+    sel = ds.path ? '[data-path="' + ds.path + '"][data-col="' + (ds.col || "") + '"]' : ds.act ? '[data-act="' + ds.act + '"]' + (ds.v ? '[data-v="' + ds.v + '"]' : "") + (ds.k ? '[data-k="' + ds.k + '"]' : "") : ds.m ? '[data-m="' + ds.m + '"]' + (ds.r ? '[data-r="' + ds.r + '"]' : "") + (ds.v ? '[data-v="' + ds.v + '"]' : "") : null;
+  }
+  back.innerHTML = menuHtml();
+  dr = back.querySelector(".drawer"); dr.scrollTop = top;
+  Array.prototype.forEach.call(back.querySelectorAll("[data-w]"), function (el) { el.style.width = Math.min(100, Number(el.dataset.w)) + "%"; });
+  if (sel) { var f = back.querySelector(sel); if (f) f.focus({ preventScroll: true }); }
+}
+function openMenu(rub) {
+  var back = drawerEl();
+  if (rub !== undefined) S.rub = rub || null;
+  S.menuView = S.view; S.menuD = D; S.menuP = P ? P.id : null; S.menuBack = S.view === "editeur" ? S.menuBack : S.view;
+  back.hidden = false; S.menuDirty = false; document.body.classList.add("menu-open"); back.classList.add("opening"); clearTimeout(S.menuAnim); S.menuAnim = setTimeout(function () { back.classList.remove("opening"); }, 300); fillMenu(false);
+  var target = S.rub && back.querySelector("#acc-" + S.rub);
+  if (target) { target.focus(); target.scrollIntoView({ block: "start" }); } else { var c = back.querySelector("[data-m='close']"); if (c) c.focus(); }
 }
 function closeMenu(focusBtn) {
-  var back = document.getElementById("drawer"); if (back.hidden) return;
+  var back = drawerEl(); if (back.hidden) return;
   back.hidden = true; back.innerHTML = ""; document.body.classList.remove("menu-open");
   if (focusBtn) { var m = document.getElementById("menu-btn"); if (m) m.focus(); }
 }
-document.getElementById("drawer").addEventListener("click", function (ev) {
+function typingIn(back) { var a = document.activeElement; return !!(a && back.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.type !== "file"); }
+function syncMenu() {
+  var back = drawerEl(), skip = S.noMenuSync; S.noMenuSync = false; if (back.hidden || skip) return;
+  if (S.view !== S.menuView || D !== S.menuD || (P ? P.id : null) !== S.menuP) closeMenu(false);
+  else if (typingIn(back)) S.menuDirty = true; /* ne pas remplacer le champ en cours de saisie : mise à jour quand on en sort */
+  else fillMenu(true);
+}
+drawerEl().addEventListener("click", function (ev) {
   var back = ev.currentTarget, b = ev.target.closest("[data-m]");
   if (!b) { if (ev.target === back) closeMenu(true); return; }
   if (b.dataset.m === "close") closeMenu(true);
   else if (b.dataset.m === "theme") {
     D.vue = D.vue || {}; if (b.dataset.v === "auto") delete D.vue.theme; else D.vue.theme = b.dataset.v; persist(); applyTheme();
     Array.prototype.forEach.call(back.querySelectorAll("[data-m='theme']"), function (x) { x.setAttribute("aria-pressed", String(x === b)); });
-  } else if (b.dataset.m === "rub") { S.rub = b.dataset.r; S.view = "reglages"; closeMenu(false); render(); window.scrollTo(0, 0); app.focus({ preventScroll: true }); }
+  } else if (b.dataset.m === "acc") {
+    S.rub = S.rub === b.dataset.r ? null : b.dataset.r; fillMenu(false);
+    var h = back.querySelector("#acc-" + b.dataset.r); if (h) { h.focus({ preventScroll: true }); if (S.rub) h.scrollIntoView({ block: "nearest" }); }
+  }
 });
-document.addEventListener("keydown", function (ev) { if (ev.key === "Escape" && !document.getElementById("drawer").hidden) closeMenu(true); });
+document.addEventListener("keydown", function (ev) { if (ev.key === "Escape" && !drawerEl().hidden) closeMenu(true); });
+drawerEl().addEventListener("focusout", function () {
+  setTimeout(function () { var back = drawerEl(); if (S.menuDirty && !back.hidden && !typingIn(back)) { S.menuDirty = false; fillMenu(true); } }, 0);
+});
 
 /* ================= Créer mon programme ================= */
 /* Modèles vérifiés (Schoenfeld 2017 ; Pelland 2026 ; ACSM 2026) : environ 10 séries fractionnées
@@ -2481,7 +2509,7 @@ function edAct(b) {
   if (!d) return;
   if (edRunAct(op, b, d, ed)) return;
   switch (op) {
-    case "quit": S.ed = null; S.view = "reglages"; render(); window.scrollTo(0, 0); break;
+    case "quit": S.ed = null; S.view = S.menuBack || "jour"; render(); window.scrollTo(0, 0); openMenu(S.rub || "creer"); break;
     case "next":
       if (ed.step === 2 && !d.seances.length) { toast("Ajoute au moins une séance."); break; }
       if (ed.step === 1 && d.type === "course" && !runObjOf(d.run)) { toast("Choisis un objectif ou indique un temps valable."); break; }
@@ -3517,7 +3545,7 @@ function docFor(col, id) {
   if (col === "profil") { if (!D.profil) D.profil = {}; return D.profil; }
   return null;
 }
-app.addEventListener("click", function (ev) {
+function onAct(ev) {
   var b = ev.target.closest("[data-act]"); if (!b || b.tagName === "SELECT" || b.tagName === "INPUT") return;
   var a = b.dataset.act, doc;
   switch (a) {
@@ -3525,7 +3553,7 @@ app.addEventListener("click", function (ev) {
     case "today": S.date = initialDate(); S.stripMon = null; S.prompt = ""; render(); break;
     case "stripweek": stripWeek(Number(b.dataset.d)); break;
     case "menu": openMenu(); break;
-    case "view": S.view = b.dataset.v; if (b.dataset.r) S.rub = b.dataset.r; D.astuceVue = true; persist(); render(); window.scrollTo(0, 0); break;
+    case "view": D.astuceVue = true; persist(); if (b.dataset.v === "reglages") { openMenu(b.dataset.r); break; } S.view = b.dataset.v; render(); window.scrollTo(0, 0); break;
     case "week": S.mon = addDays(S.mon, 7 * Number(b.dataset.d)); render(); break;
     case "sansprog": D.sansProgramme = true; persistNow(); S.date = todayStr(); S.mon = mondayOfDate(S.date); S.view = "jour"; render(); window.scrollTo(0, 0); break;
     case "version": doc = weekDoc(Number(b.dataset.w), true); doc.version = b.dataset.v; persist(); render(); break;
@@ -3618,7 +3646,9 @@ app.addEventListener("click", function (ev) {
       break;
     case "update": if (swReg && swReg.waiting) swReg.waiting.postMessage("skipWaiting"); break;
   }
-});
+}
+app.addEventListener("click", onAct);
+
 /* Bande des jours : glisser vers la gauche ou la droite change de semaine */
 function stripWeek(d) { S.stripMon = addDays(S.stripMon || mondayOfDate(S.date), 7 * d); S.slide = d > 0 ? "next" : "prev"; render(); }
 var swipe = null;
@@ -3629,11 +3659,11 @@ app.addEventListener("pointerup", function (ev) {
   var dx = ev.clientX - swipe.x, dy = ev.clientY - swipe.y; swipe = null;
   if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.5) { S.swipeAt = Date.now(); stripWeek(dx < 0 ? 1 : -1); }
 });
-app.addEventListener("change", function (ev) {
+function onChange(ev) {
   var el = ev.target;
   if (el.dataset.act === "add" && el.value === LIBRE) { el.value = ""; libreDialog(S.date, null); return; }
   if (el.dataset.act === "add" && el.value === "CARDIO") { el.value = ""; cardioDialog(S.date, null); return; }
-  if (el.dataset.col === "profil" || (el.dataset.path && /^fmt\./.test(el.dataset.path))) { render(); return; }
+  if (el.dataset.col === "profil" || (el.dataset.path && /^fmt\./.test(el.dataset.path))) { if (drawerEl().contains(el)) { S.menuDirty = true; S.noMenuSync = true; } render(); return; }
   if (el.dataset.act === "add" && el.value) { var s = seance(S.date, el.value, true); s.ajoutee = true; persist(); render(); return; }
   if (el.dataset.act === "import-file" && el.files && el.files[0]) { importFile(el.files[0]); el.value = ""; return; }
   if (el.dataset.act === "edsel" && S.ed) {
@@ -3648,9 +3678,11 @@ app.addEventListener("change", function (ev) {
     saveDraft(S.ed.d); edLive(); return;
   }
   if (el.dataset.path && (/\.nom$/.test(el.dataset.path) || el.dataset.path === "chrono.temps" || (el.dataset.path === "distanceTest" && el.dataset.col === "seances"))) render();
-});
+}
+app.addEventListener("change", onChange);
+
 var NUMERIC = /\.(c|r|rir|t|m)$|^kg$|^duree$|^distance$|^distanceTest$|^combats$|^footing$|^sommeil$|^tests\.|^mensu\.|^age$|^fcmax$|^fcrepos$|^deniv$|^fcMoy$|^fcMax$|^puiss$|^distTot$|^reps\.\d+\.\d+\.(d|p|v|fc)$|^fmt\.(effort|recup|reps|series|entre|echauf|calme)$/;
-app.addEventListener("input", function (ev) {
+function onInput(ev) {
   var el = ev.target; if (!el.dataset || !el.dataset.path) return;
   if (el.dataset.col === "ed") { edInput(el); return; }
   var doc = docFor(el.dataset.col, el.dataset.id); if (!doc) return;
@@ -3663,7 +3695,10 @@ app.addEventListener("input", function (ev) {
     if (a0) a0.textContent = fmt(weekAvg(mon0), 2); if (a1) a1.textContent = fmtHours(sw0.avg); if (a2) a2.textContent = sleepLabel(sw0);
   }
   if (el.dataset.col === "seances") liveUpdate(el.dataset.id);
-});
+}
+app.addEventListener("input", onInput);
+["click", "change", "input"].forEach(function (t) { document.getElementById("drawer").addEventListener(t, t === "click" ? onAct : t === "change" ? onChange : onInput); });
+
 
 /* ================= Mode hors ligne ================= */
 var swReg = null;
