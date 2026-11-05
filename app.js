@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.7.0";
+var APP_VERSION = "1.8.0";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -26,7 +26,7 @@ var D = (function () {
 var saveTimer = null;
 function persistNow() {
   clearTimeout(saveTimer); saveTimer = null;
-  try { localStorage.setItem(KEY, JSON.stringify(D)); storageOK = true; setSaved("Enregistré sur ce téléphone"); }
+  try { localStorage.setItem(KEY, JSON.stringify(D)); storageOK = true; setSaved("Enregistré"); }
   catch (err) { storageOK = false; setSaved("Échec de l'enregistrement : exporte tes données"); }
 }
 function persist() { setSaved("Enregistrement…"); clearTimeout(saveTimer); saveTimer = setTimeout(persistNow, 250); }
@@ -418,14 +418,16 @@ function dialog(title, bodyHtml, actions) {
 /* ================= Rendu ================= */
 function render() {
   var y = window.scrollY;
+  applyTheme();
   renderMasthead();
   var tabs = document.getElementById("tabs");
-  tabs.classList.toggle("hidden", !P && !D.sansProgramme);
+  tabs.classList.toggle("hidden", !P && !D.sansProgramme && S.view !== "reglages");
   var tv = S.view === "editeur" ? "reglages" : S.view;
   Array.prototype.forEach.call(tabs.querySelectorAll(".tab"), function (t) { if (t.dataset.view === tv) t.setAttribute("aria-current", "page"); else t.removeAttribute("aria-current"); });
   var h;
   if (S.view === "editeur" && !S.ed) S.view = "reglages";
   if (S.view === "editeur") h = viewEditeur();
+  else if (S.view === "reglages") h = viewReglages();
   else if (!P && !D.sansProgramme) h = viewWelcome();
   else if (S.view === "jour") h = viewJour();
   else if (S.view === "semaine") h = viewSemaine();
@@ -438,7 +440,7 @@ function render() {
   window.scrollTo(0, y);
 }
 function renderMasthead() {
-  var m = document.getElementById("masthead"), h = '<div class="app-name"><span>Carnet de musculation</span><span class="saved" id="saved">' + (storageOK ? "Enregistré sur ce téléphone" : "Stockage indisponible") + "</span></div>";
+  var m = document.getElementById("masthead"), h = '<div class="app-name"><span class="brand">' + (S.view === "editeur" ? "" : '<button type="button" class="menu-btn" id="menu-btn" data-act="menu" aria-label="Ouvrir le menu Réglages" aria-haspopup="dialog"><span class="burger" aria-hidden="true"><i></i><i></i><i></i></span></button>') + '<span>Carnet de musculation</span></span><span class="saved" id="saved">' + (storageOK ? "Enregistré" : "Stockage indisponible") + "</span></div>";
   if (S.view === "editeur") { /* rien : l'éditeur occupe l'écran */ }
   else if (P && (S.date || todayStr()) > lastDay()) {
     h += '<div class="block"><div class="block-title"><h2>' + esc(P.titre || "Programme") + '</h2><span class="tiny muted num">terminé le ' + esc(fmtShort(lastDay())) + "</span></div>" +
@@ -530,7 +532,7 @@ function viewJour() {
   h += '<div class="daynav"><h1>' + esc(fmtLong(date)) + "</h1>" + (date !== initialDate() || S.stripMon !== mondayOfDate(initialDate()) ? '<button type="button" class="linkbtn" data-act="today">Aujourd\'hui</button>' : "") + "</div>";
   h += '<p class="small muted">' + esc(weekLabel(date)) + "</p>";
   if (P && todayStr() < P.debut && date === P.debut) h += '<div class="note info">Le bloc commence le ' + esc(fmtLong(P.debut)) + ". Voici la première séance.</div>";
-  if (!isStandalone && !D.astuceVue) h += '<div class="note info row"><span class="grow">Installe l\'application sur ton écran d\'accueil pour l\'utiliser sans réseau et protéger tes données.</span><button type="button" class="btn small" data-act="view" data-v="reglages">Comment faire</button></div>';
+  if (!isStandalone && !D.astuceVue) h += '<div class="note info row"><span class="grow">Installe l\'application sur ton écran d\'accueil pour l\'utiliser sans réseau et protéger tes données.</span><button type="button" class="btn small" data-act="view" data-v="reglages" data-r="ecran">Comment faire</button></div>';
   if (plan === null && P && P.question) h += choiceSheet(w);
   h += weightSheet(date);
   var types = (plan || compPlanned(date)).slice();
@@ -1183,7 +1185,7 @@ function consigneHtml(s, ci, f) {
   var h = '<div class="target"><h3>Ta consigne</h3>' + kvRows(rows);
   if (t !== "fractionne") h += '<p class="tiny muted">' + (b ? esc(bandsNote(b)) : 'Indique ton âge ou ta FC max dans Réglages pour avoir une fourchette de FC. En attendant, fie-toi au ressenti et au test de la parole.') + "</p>";
   if (foot) h += '<p class="tiny muted">' + esc(foot) + "</p>";
-  if (!b && t !== "fractionne") h += '<div><button type="button" class="btn small" data-act="view" data-v="reglages">Compléter mon profil</button></div>';
+  if (!b && t !== "fractionne") h += '<div><button type="button" class="btn small" data-act="view" data-v="reglages" data-r="profil">Compléter mon profil</button></div>';
   return h + "</div>";
 }
 function sportNote(sport) {
@@ -1901,39 +1903,104 @@ function chart(series, opt) {
 }
 
 /* ---------- Réglages ---------- */
-function viewReglages() {
-  var h = "<h1>Réglages</h1>";
-  h += '<section class="sheet"><h2>Mon programme</h2>';
+var RUBS = [
+  { g: "Programme", k: "prog", t: "Mon programme" }, { k: "creer", t: "Créer un programme", d: "Musculation, course ou mixte" },
+  { g: "Affichage", k: "apparence" },
+  { g: "Profil", k: "profil", t: "Profil cardio", d: "Âge, fréquence cardiaque" }, { k: "disc", t: "Disciplines", d: "Activités cardio proposées" },
+  { k: "alertes", t: "Alertes de surmenage", d: "Règle des 10 %, fatigue" }, { k: "courbes", t: "Courbes de force", d: "Exercices suivis dans Progrès" },
+  { g: "Données", k: "sauv", t: "Sauvegarde", d: "Exporter ou restaurer" }, { k: "ecran", t: "Écran d'accueil", d: "Installer l'application" },
+  { k: "donnees", t: "Tes données", d: "Ce qui reste sur ce téléphone" }, { k: "effacer", t: "Tout effacer", d: "Supprime tout sur ce téléphone", cls: "danger" }
+];
+function rubOf(k) { return RUBS.filter(function (r) { return r.k === k && r.t; })[0]; }
+function noH2(html) { return html.replace(/<h2>[^<]*<\/h2>/, ""); }
+function reglProg() {
+  var h = '<section class="sheet">';
   if (P) h += '<p class="small">' + esc(P.athlete ? P.athlete + ", " : "") + esc(P.titre || "") + ", du " + esc(fmtLong(P.debut)) + " au " + esc(fmtLong(lastDay())) + (todayStr() > lastDay() ? ". Bloc terminé : tu es en séances libres en attendant le suivant." : ".") + "</p>";
   else h += '<p class="small">Aucun programme installé : tu fais des séances libres. Si un coach t\'envoie un programme, colle son lien ci-dessous ; ton historique est conservé.</p>';
   if (P && D.liens[P.id]) h += '<div class="row"><button type="button" class="btn" data-act="copylink">Copier mon lien personnel</button></div><p class="small muted">Utile pour installer le programme dans l\'application d\'écran d\'accueil, ou sur un autre téléphone. Ne le partage pas : il contient ton programme.</p>';
   h += compSheet();
   if (P && P.src && !P.run && P.src.type !== "mixte") h += objSheet();
   if (P && P.src) h += '<div class="row"><button type="button" class="btn" data-act="edmodify">Modifier les séances</button><button type="button" class="btn" data-act="mylink">Copier le lien de ce programme</button></div>';
-  h += '<div class="hr"></div><div class="titled"><h3>Créer mon propre programme</h3><p class="small muted">Compose tes séances, place-les dans la semaine et choisis la durée du bloc. Il s\'installe comme un programme reçu par lien ; tes séances déjà notées sont conservées.</p></div>' +
+  h += '<div class="hr"></div>';
+  var others = keysOf(D.programmes).filter(function (k) { return !P || k !== P.id; });
+  if (others.length) h += '<div class="scale"><div class="scale-q"><span>Autres programmes sur ce téléphone</span></div><div class="row">' + others.map(function (k) { return '<button type="button" class="btn small" data-act="switchprog" data-id="' + esc(k) + '">' + esc(D.programmes[k].titre || k) + "</button>"; }).join("") + "</div></div>";
+  h += '<label class="field" for="code-in"><span>' + (P ? "Nouveau programme envoyé par ton coach : colle le lien" : "Programme envoyé par ton coach : colle le lien") + '</span><textarea id="code-in" placeholder="https://…#p=1.…"></textarea></label><div class="row"><button type="button" class="btn" data-act="paste-install">Installer ce programme</button></div><p class="small muted">Tes séances déjà notées sont conservées.</p></section>';
+  return h;
+}
+function reglCreer() {
+  var h = '<section class="sheet"><p class="small muted">Compose tes séances, place-les dans la semaine et choisis la durée du bloc. Il s\'installe comme un programme reçu par lien ; tes séances déjà notées sont conservées.</p>' +
     '<div class="stack-btns"><button type="button" class="btn primary wide" data-act="edstart">Créer un programme</button>' + (P ? '<button type="button" class="btn wide" data-act="edcopy">Copier ce programme pour le modifier</button>' : "") + "</div>";
   var drafts = valuesOf(D.brouillons || {}).sort(function (a, b) { return (b.maj || "") < (a.maj || "") ? -1 : 1; });
   if (drafts.length) h += '<div class="section"><h3>Mes programmes en préparation</h3>' + drafts.map(function (d) {
     var nm = d.seances.filter(function (s) { return s.kind === "muscu"; }).length;
     return '<div class="log-item"><div class="row"><b>' + esc(d.nom || "Mon programme") + '</b><span class="small muted">' + esc((d.pid ? "modification en cours" : "brouillon") + " · " + (Math.round(toNum(d.semaines)) || 6) + " semaines") + '</span></div><div class="row"><span class="small muted grow">' + esc((MATS.filter(function (m) { return m.v === d.mat; })[0] || { l: "" }).l + (nm ? ", " + nm + " séance" + (nm > 1 ? "s" : "") + " de musculation" : "")) + '</span><button type="button" class="linkbtn" data-act="edresume" data-id="' + esc(d.id) + '">Reprendre</button><button type="button" class="linkbtn" data-act="edrm" data-id="' + esc(d.id) + '">Supprimer</button></div></div>';
   }).join("") + "</div>";
-  h += '<div class="hr"></div>';
-  var others = keysOf(D.programmes).filter(function (k) { return !P || k !== P.id; });
-  if (others.length) h += '<div class="scale"><div class="scale-q"><span>Autres programmes sur ce téléphone</span></div><div class="row">' + others.map(function (k) { return '<button type="button" class="btn small" data-act="switchprog" data-id="' + esc(k) + '">' + esc(D.programmes[k].titre || k) + "</button>"; }).join("") + "</div></div>";
-  h += '<label class="field" for="code-in"><span>' + (P ? "Nouveau programme envoyé par ton coach : colle le lien" : "Programme envoyé par ton coach : colle le lien") + '</span><textarea id="code-in" placeholder="https://…#p=1.…"></textarea></label><div class="row"><button type="button" class="btn" data-act="paste-install">Installer ce programme</button></div><p class="small muted">Tes séances déjà notées sont conservées.</p></section>';
-  h += profilSheet();
-  h += alertesSheet();
-  h += sportsSheet();
-  h += courbesReglage();
-  h += '<section class="sheet"><h2>Sauvegarde</h2><p class="small">Tes données ne sont que sur ce téléphone. Exporte une sauvegarde régulièrement, par exemple chaque dimanche, et garde-la dans Fichiers ou envoie-la-toi.</p>' +
-    '<div class="row"><button type="button" class="btn primary" data-act="export">Exporter mes données</button></div>' +
-    '<label class="field" for="file-prog"><span>Restaurer une sauvegarde ou importer un fichier de programme</span><input type="file" id="file-prog" accept=".json,application/json" data-act="import-file"></label></section>';
-  h += installHelp();
-  h += privacyNote();
-  h += '<section class="sheet"><h2>Tout effacer</h2><p class="small">Supprime le programme et toutes les données de ce téléphone. Exporte une sauvegarde avant si tu veux les garder.</p><div><button type="button" class="btn danger" data-act="wipe">Effacer toutes mes données</button></div></section>';
-  h += '<p class="tiny muted">Version ' + APP_VERSION + (isStandalone ? ", application installée" : "") + ".</p>";
-  return h;
+  return h + "</section>";
 }
+function viewReglages() {
+  var r = rubOf(S.rub) || rubOf("prog"), h = '<button type="button" class="back" data-act="menu">‹ Menu</button><h1>' + esc(r.t) + "</h1>", b = "";
+  switch (r.k) {
+    case "prog": b = reglProg(); break;
+    case "creer": b = reglCreer(); break;
+    case "profil": b = noH2(profilSheet()); break;
+    case "disc": b = noH2(sportsSheet()); break;
+    case "alertes": b = noH2(alertesSheet()); break;
+    case "courbes": b = noH2(courbesReglage()) || '<section class="sheet"><p class="small muted">Les exercices à suivre apparaissent ici après ta première séance de musculation notée.</p></section>'; break;
+    case "sauv": b = '<section class="sheet"><p class="small">Tes données ne sont que sur ce téléphone. Exporte une sauvegarde régulièrement, par exemple chaque dimanche, et garde-la dans Fichiers ou envoie-la-toi.</p>' +
+      '<div class="row"><button type="button" class="btn primary" data-act="export">Exporter mes données</button></div>' +
+      '<label class="field" for="file-prog"><span>Restaurer une sauvegarde ou importer un fichier de programme</span><input type="file" id="file-prog" accept=".json,application/json" data-act="import-file"></label></section>'; break;
+    case "ecran": b = noH2(installHelp()) + (isStandalone ? '<p class="small muted">C\'est déjà fait : tu utilises l\'application installée.</p>' : ""); break;
+    case "donnees": b = noH2(privacyNote()); break;
+    case "effacer": b = '<section class="sheet"><p class="small">Supprime le programme et toutes les données de ce téléphone. Exporte une sauvegarde avant si tu veux les garder.</p><div><button type="button" class="btn danger" data-act="wipe">Effacer toutes mes données</button></div></section>'; break;
+  }
+  return h + b;
+}
+
+/* ---------- Menu latéral et apparence ---------- */
+var THEMES = [{ v: "auto", l: "Automatique" }, { v: "jour", l: "Jour" }, { v: "nuit", l: "Nuit" }];
+function themeOf() { var t = D.vue && D.vue.theme; return t === "jour" || t === "nuit" ? t : "auto"; }
+function applyTheme() {
+  var t = themeOf(), root = document.documentElement;
+  if (t === "jour") root.setAttribute("data-theme", "light"); else if (t === "nuit") root.setAttribute("data-theme", "dark"); else root.removeAttribute("data-theme");
+  Array.prototype.forEach.call(document.querySelectorAll('meta[name="theme-color"]'), function (m) {
+    var dark = /dark/.test(m.getAttribute("media") || "");
+    m.setAttribute("content", t === "jour" ? "#f4f5f2" : t === "nuit" ? "#121417" : dark ? "#121417" : "#f4f5f2");
+  });
+}
+function menuHtml() {
+  var t = themeOf(), h = '<aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="menu-t"><div class="drawer-head"><h2 id="menu-t">Réglages</h2><button type="button" class="icon-btn" data-m="close" aria-label="Fermer le menu"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13"></path></svg></button></div><div class="drawer-body">';
+  RUBS.forEach(function (r) {
+    if (r.g) h += '<p class="grp">' + esc(r.g) + "</p>";
+    if (r.k === "apparence") { h += '<div class="mi-app"><b id="app-t">Apparence</b><div class="seg" role="group" aria-labelledby="app-t">' + THEMES.map(function (x) { return '<button type="button" data-m="theme" data-v="' + x.v + '" aria-pressed="' + (t === x.v) + '">' + x.l + "</button>"; }).join("") + "</div></div>"; return; }
+    var d = r.d;
+    if (r.k === "prog") d = P ? (P.titre || "Programme") + " · lien du coach" : "Coller le lien de ton coach";
+    if (r.k === "creer") { var n = keysOf(D.brouillons || {}).length; if (n) d += " · " + n + " en préparation"; }
+    if (r.k === "ecran" && isStandalone) d = "Application installée";
+    var cur = S.view === "reglages" && (rubOf(S.rub) || rubOf("prog")).k === r.k;
+    h += '<button type="button" class="mi' + (r.cls ? " " + r.cls : "") + '" data-m="rub" data-r="' + r.k + '"' + (cur ? ' aria-current="page"' : "") + '><span><b>' + esc(r.t) + '</b><span class="small">' + esc(d) + '</span></span><span class="chev" aria-hidden="true">›</span></button>';
+  });
+  return h + '<p class="ver">Version ' + APP_VERSION + (isStandalone ? ", application installée" : "") + ".</p></div></aside>";
+}
+function openMenu() {
+  var back = document.getElementById("drawer");
+  back.innerHTML = menuHtml(); back.hidden = false; document.body.classList.add("menu-open");
+  var c = back.querySelector("[data-m='close']"); if (c) c.focus();
+}
+function closeMenu(focusBtn) {
+  var back = document.getElementById("drawer"); if (back.hidden) return;
+  back.hidden = true; back.innerHTML = ""; document.body.classList.remove("menu-open");
+  if (focusBtn) { var m = document.getElementById("menu-btn"); if (m) m.focus(); }
+}
+document.getElementById("drawer").addEventListener("click", function (ev) {
+  var back = ev.currentTarget, b = ev.target.closest("[data-m]");
+  if (!b) { if (ev.target === back) closeMenu(true); return; }
+  if (b.dataset.m === "close") closeMenu(true);
+  else if (b.dataset.m === "theme") {
+    D.vue = D.vue || {}; if (b.dataset.v === "auto") delete D.vue.theme; else D.vue.theme = b.dataset.v; persist(); applyTheme();
+    Array.prototype.forEach.call(back.querySelectorAll("[data-m='theme']"), function (x) { x.setAttribute("aria-pressed", String(x === b)); });
+  } else if (b.dataset.m === "rub") { S.rub = b.dataset.r; S.view = "reglages"; closeMenu(false); render(); window.scrollTo(0, 0); app.focus({ preventScroll: true }); }
+});
+document.addEventListener("keydown", function (ev) { if (ev.key === "Escape" && !document.getElementById("drawer").hidden) closeMenu(true); });
 
 /* ================= Créer mon programme ================= */
 /* Modèles vérifiés (Schoenfeld 2017 ; Pelland 2026 ; ACSM 2026) : environ 10 séries fractionnées
@@ -3419,6 +3486,7 @@ document.getElementById("tabs").addEventListener("click", function (ev) {
   render(); window.scrollTo(0, 0);
 });
 document.getElementById("masthead").addEventListener("click", function (ev) {
+  if (ev.target.closest("[data-act='menu']")) { openMenu(); return; }
   var b = ev.target.closest("[data-act='gotoweek']"); if (!b) return;
   S.mon = mondayOf(Number(b.dataset.w)); S.view = "semaine"; render(); window.scrollTo(0, 0);
 });
@@ -3456,7 +3524,8 @@ app.addEventListener("click", function (ev) {
     case "goto": if (b.classList.contains("day") && Date.now() - S.swipeAt < 400) break; S.date = b.dataset.date; S.view = "jour"; S.prompt = ""; render(); if (b.classList.contains("wrow") || b.classList.contains("log-item")) window.scrollTo(0, 0); break;
     case "today": S.date = initialDate(); S.stripMon = null; S.prompt = ""; render(); break;
     case "stripweek": stripWeek(Number(b.dataset.d)); break;
-    case "view": S.view = b.dataset.v; D.astuceVue = true; persist(); render(); window.scrollTo(0, 0); break;
+    case "menu": openMenu(); break;
+    case "view": S.view = b.dataset.v; if (b.dataset.r) S.rub = b.dataset.r; D.astuceVue = true; persist(); render(); window.scrollTo(0, 0); break;
     case "week": S.mon = addDays(S.mon, 7 * Number(b.dataset.d)); render(); break;
     case "sansprog": D.sansProgramme = true; persistNow(); S.date = todayStr(); S.mon = mondayOfDate(S.date); S.view = "jour"; render(); window.scrollTo(0, 0); break;
     case "version": doc = weekDoc(Number(b.dataset.w), true); doc.version = b.dataset.v; persist(); render(); break;

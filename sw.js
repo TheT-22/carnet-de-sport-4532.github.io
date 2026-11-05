@@ -1,6 +1,6 @@
 /* Service worker : met l'application en cache pour l'utiliser sans réseau.
    Il ne met en cache que les fichiers de l'application, jamais les données de l'utilisateur. */
-var CACHE = "carnet-muscu-1.7.0";
+var CACHE = "carnet-muscu-1.8.0";
 var FILES = ["./", "index.html", "styles.css", "app.js", "manifest.webmanifest",
   "fonts/archivo-latin-wdth-normal.woff2", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png", "icons/icon-maskable-512.png"];
 
