@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.11.2";
+var APP_VERSION = "1.11.3";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -542,7 +542,7 @@ function viewJour() {
   h += flexAsk(date) + autoTodayNote(date);
   if (autoOn() && inBlock(date) && date > todayStr()) h += '<div class="note info">Prévision : le carnet ajuste la séance de ce jour selon tes réponses et tes séances d\'ici là.</div>';
   var types = (plan || compPlanned(date)).slice();
-  valuesOf(D.seances).forEach(function (s) { if (s.date === date && types.indexOf(s.type) < 0 && s.type !== LIBRE && !isCardioType(s.type) && (sessionDef(s.type) || (hasData(s) && defOf(s)))) types.push(s.type); });
+  valuesOf(D.seances).forEach(function (s) { if (s.date === date && types.indexOf(s.type) < 0 && s.type !== LIBRE && !isCardioType(s.type) && (hasData(s) || s.ajoutee || (s.smod && s.smod.statut)) && (sessionDef(s.type) || (hasData(s) && defOf(s)))) types.push(s.type); });
   if (!types.length && plan !== null && !libreOf(date) && !cardioOf(date).length) h += freeSheet(date);
   keysOf(D.avances || {}).forEach(function (k) { var i = k.lastIndexOf("_"); if (k.slice(0, i) === date) h += '<div class="note info">' + esc(shortName(k.slice(i + 1))) + " a été avancée au " + esc(fmtLong(D.avances[k])) + ".</div>"; });
   h += fatigueBanner(date, types);
