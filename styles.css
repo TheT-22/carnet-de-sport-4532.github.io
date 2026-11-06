@@ -469,3 +469,6 @@ body.menu-open { overflow: hidden; }
 .pick.warn .small { color: var(--caution); }
 .pick.off { opacity: .45; cursor: default; }
 ul.rules { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+
+/* Bouton « Séance sautée ou remplacée » : couleur des imprévus */
+.btn.smod-btn { border-color: var(--caution); color: var(--caution); background: var(--caution-soft); font-weight: 650; }
