@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.11.1";
+var APP_VERSION = "1.11.2";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -263,7 +263,8 @@ function anyData(date) { return valuesOf(D.seances).some(function (s) { return s
 function sessionLabel(s) { if (s.type === LIBRE) return "Séance libre"; if (isCardioType(s.type)) return cardioTitle(s); if (s.plan) return s.plan.short; var d = sessionDef(s.type); return d ? d.short || d.name : s.type; }
 
 function plannedFor(date) {
-  var base = autoOn() && inBlock(date) ? autoPlanned(date) : plannedBase(date); if (base === null) return null;
+  var auto = autoOn() && inBlock(date), base = auto ? autoPlanned(date) : plannedBase(date); if (base === null) return null;
+  if (!auto && P && inBlock(date) && date >= todayStr()) base = base.filter(function (t) { return !doneAhead(date, t); });
   compPlanned(date).forEach(function (t) { if (base.indexOf(t) < 0) base.push(t); });
   if (D.avances) base = base.filter(function (t) { return !D.avances[date + "_" + t]; });
   return base;
@@ -1625,7 +1626,8 @@ function viewSemaine() {
       valuesOf(D.seances).forEach(function (x) { if (x.date === d && x.type !== LIBRE && !isCardioType(x.type) && realData(x) && (types || []).indexOf(x.type) < 0 && sessionDef(x.type)) names.push(shortName(x.type)); });
       if (names.length > 1) names = names.filter(function (n) { return n !== shortName("REPOS"); });
       cardioOf(d).forEach(function (s) { names.push(cardioTitle(s)); });
-      label = types === null ? "Selon l'organisation de la semaine" + (lib ? ", séance libre" : "") : names.length ? names.join(" et ") : skip.length ? "Repos" : "Rien de prévu";
+      var ahead = autoOn() || d < todayStr() ? [] : (plannedBase(d) || []).filter(function (t) { return doneAhead(d, t); });
+      label = types === null ? "Selon l'organisation de la semaine" + (lib ? ", séance libre" : "") : names.length ? names.join(" et ") : ahead.length ? "Repos (" + ahead.map(shortName).join(", ").toLowerCase() + " déjà fait" + (ahead.length > 1 ? "s" : "") + ")" : skip.length || (autoOn() && d >= todayStr()) ? "Repos" : "Rien de prévu";
     } else {
       var notees = valuesOf(D.seances).filter(function (s) { return s.date === d && realData(s); }).map(sessionLabel);
       label = notees.length ? notees.join(" et ") : "–";
@@ -3518,6 +3520,8 @@ function weekPlan(mon, nf) {
   days.forEach(function (d) {
     if (d > today) return;
     doneTypes(d).forEach(function (t) { for (var k = 0; k < pool.length; k++) if (pool[k].t === t) { done.push({ t: t, date: d }); pool.splice(k, 1); return; } });
+    /* une activité cardio notée hors programme compte pour la séance de course du programme qui lui correspond */
+    cardioOf(d).forEach(function (c) { if (!realData(c)) return; for (var k = 0; k < pool.length; k++) { var df = P.sessions[pool[k].t]; if (df && df.kind === "course" && cardioFits(c, pool[k].t, w)) { done.push({ t: pool[k].t, date: d }); pool.splice(k, 1); return; } } });
   });
   var start = days.indexOf(today) >= 0 ? days.indexOf(today) : mon > today ? 0 : 7, hist = [], restDays = 0;
   days.forEach(function (d, i) { if (i < start) { var a = dayActual(d); hist[i] = a; if (!a) restDays++; } });
@@ -3577,6 +3581,18 @@ function weekPlan(mon, nf) {
   var asg = best.asg || [], res = { mon: mon, w: w, days: days, start: start, hist: hist, done: done, fixed: fixed, asg: asg, left: best.left || pool, pool: pool, cost: best.cost, forced: forced };
   PLAN_CACHE[key] = res;
   return res;
+}
+function cardioFits(c, t, w) { var ci = cardioInfo(c) || {}; return (ci.ctype === "fractionne") === !!profOf(t, w).frac && (c.sport || "course") === "course"; }
+/* Jours fixes : séance déjà faite plus tôt dans la semaine, à un autre jour que prévu */
+function doneAhead(date, t) {
+  var d0 = sessionDef(t); if (!d0 || t === "REPOS" || d0.kind === "repos" || d0.kind === "tests" || d0.kind === "mensu") return false;
+  var mon = mondayOfDate(date), planned = 0, done = 0, w = weekOf(date);
+  for (var i = 0; i < 7; i++) {
+    var d = addDays(mon, i); if (d > date) break;
+    if ((plannedBase(d) || []).indexOf(t) >= 0) planned++;
+    if (d < date && (doneTypes(d).indexOf(t) >= 0 || (d0.kind === "course" && cardioOf(d).some(function (c) { return realData(c) && cardioFits(c, t, w); })))) done++;
+  }
+  return planned > 0 && done >= planned;
 }
 function plannedBaseFixed(date) {
   if (!P || date < P.debut) return [];
