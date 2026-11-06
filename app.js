@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.11.0";
+var APP_VERSION = "1.11.1";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -257,7 +257,9 @@ function initialDate() { var t = todayStr(); if (P && t < P.debut) return P.debu
 function inBlock(date) { return !!P && date >= P.debut && date <= lastDay(); }
 function mondayOfDate(date) { return addDays(date, -dow(date)); }
 function blockWeek(mon) { return !!P && mon >= P.debut && mon <= lastDay() && weekOf(mon) <= P.semaines; }
-function anyData(date) { return valuesOf(D.seances).some(function (s) { return s.date === date && s.type !== "REPOS" && hasData(s); }); }
+function isSkipped(s) { return !!(s && s.smod && s.smod.statut === "saute"); }
+function realData(s) { return hasData(s) && !isSkipped(s); }
+function anyData(date) { return valuesOf(D.seances).some(function (s) { return s.date === date && s.type !== "REPOS" && realData(s); }); }
 function sessionLabel(s) { if (s.type === LIBRE) return "Séance libre"; if (isCardioType(s.type)) return cardioTitle(s); if (s.plan) return s.plan.short; var d = sessionDef(s.type); return d ? d.short || d.name : s.type; }
 
 function plannedFor(date) {
@@ -311,7 +313,7 @@ function dayDone(date) {
   var types = plannedFor(date), libDone = anyData(date);
   function ok(t) { var x = seance(date, t); return hasData(x) || replacedDone(date, t) || !!(x && x.adapte && x.adapte.repos); }
   if (!types || !types.length) return libDone ? true : null;
-  var real = types.filter(function (t) { return t !== "REPOS"; });
+  var real = types.filter(function (t) { return t !== "REPOS" && !isSkipped(seance(date, t)); });
   if (!real.length) return libDone ? true : null;
   return real.every(ok);
 }
@@ -1616,13 +1618,16 @@ function viewSemaine() {
   for (var i = 0; i < 7; i++) {
     var d = addDays(mon, i), label, done = dayDone(d);
     if (inBlock(d)) {
-      var types = plannedFor(d), lib = libreOf(d);
+      var types = plannedFor(d), lib = libreOf(d), skip = valuesOf(D.seances).filter(function (x) { return x.date === d && isSkipped(x); }).map(function (x) { return x.type; });
+      types = types && types.filter(function (t) { return skip.indexOf(t) < 0; });
       var names = (types || []).map(function (t) { return isReplaced(d, t) ? "Séance libre" : shortName(t); });
       if (lib && !(types || []).some(function (t) { return isReplaced(d, t); })) names.push("Séance libre");
+      valuesOf(D.seances).forEach(function (x) { if (x.date === d && x.type !== LIBRE && !isCardioType(x.type) && realData(x) && (types || []).indexOf(x.type) < 0 && sessionDef(x.type)) names.push(shortName(x.type)); });
+      if (names.length > 1) names = names.filter(function (n) { return n !== shortName("REPOS"); });
       cardioOf(d).forEach(function (s) { names.push(cardioTitle(s)); });
-      label = types === null ? "Selon l'organisation de la semaine" + (lib ? ", séance libre" : "") : names.length ? names.join(" et ") : "Rien de prévu";
+      label = types === null ? "Selon l'organisation de la semaine" + (lib ? ", séance libre" : "") : names.length ? names.join(" et ") : skip.length ? "Repos" : "Rien de prévu";
     } else {
-      var notees = valuesOf(D.seances).filter(function (s) { return s.date === d && hasData(s); }).map(sessionLabel);
+      var notees = valuesOf(D.seances).filter(function (s) { return s.date === d && realData(s); }).map(sessionLabel);
       label = notees.length ? notees.join(" et ") : "–";
     }
     h += '<button type="button" class="wrow' + (d === todayStr() ? " today" : "") + '" data-act="goto" data-date="' + d + '"><span class="d">' + esc(fmtDayName(d)) + " " + parse(d).getDate() + "</span><span>" + esc(label) + '</span><span class="tick' + (done ? " done" : "") + '" aria-label="' + (done ? "fait" : "à faire") + '"></span></button>';
@@ -1642,7 +1647,7 @@ function viewSemaine() {
   h += claudeSheet("semaine");
   return h;
 }
-function countDone(from, to) { return valuesOf(D.seances).filter(function (s) { return s.date >= from && s.date <= to && s.type !== "REPOS" && hasData(s); }).length; }
+function countDone(from, to) { return valuesOf(D.seances).filter(function (s) { return s.date >= from && s.date <= to && s.type !== "REPOS" && realData(s); }).length; }
 
 /* ---------- Progrès ---------- */
 function viewProgres() {
@@ -3589,8 +3594,8 @@ function autoPlanned(date) {
   var today = todayStr(), mon = mondayOfDate(date), out = (plannedBaseFixed(date) || []).slice();
   if (date < today) {
     doneTypes(date).forEach(function (t) { if (out.indexOf(t) < 0) out.push(t); });
-    valuesOf(D.seances).forEach(function (s) { if (s.date === date && P.sessions[s.type] && s.smod && s.smod.statut && out.indexOf(s.type) < 0) out.push(s.type); });
-    var pj = plj(date); if (pj.propose && out.indexOf(pj.propose) < 0 && !doneTypes(date).length) out.push(pj.propose);
+    valuesOf(D.seances).forEach(function (s) { if (s.date === date && P.sessions[s.type] && s.smod && s.smod.statut === "remplace" && out.indexOf(s.type) < 0) out.push(s.type); });
+    var pj = plj(date); if (pj.propose && out.indexOf(pj.propose) < 0 && !doneTypes(date).length && !isSkipped(seance(date, pj.propose))) out.push(pj.propose);
     return out;
   }
   var wp = weekPlan(mon), di = dow(date), t = wp.asg[di];
@@ -3659,8 +3664,8 @@ function weekCard(date) {
     var st, names;
     if (d < today || (d === today && dayActual(d))) {
       var a = dayActual(d), sk = valuesOf(D.seances).filter(function (s) { return s.date === d && s.smod && s.smod.statut === "saute"; });
-      names = a ? a.names.join(", ") : sk.length ? sk.map(function (s) { return shortName(s.type); }).join(", ") : "Repos";
-      st = a ? "✓ faite" : sk.length ? "sautée" : "repos";
+      names = a ? a.names.join(", ") : "Repos";
+      st = a ? "✓ faite" : sk.length ? sk.map(function (s) { return shortName(s.type); }).join(", ").toLowerCase() + " sautée" : "repos";
     } else {
       var t = wp.asg[i], fx = wp.fixed[d] || [];
       names = fx.concat(t && t !== "__done" ? [t] : []).map(shortName).join(", ") || "Repos";
