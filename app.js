@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.10.0";
+var APP_VERSION = "1.11.0";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -29,7 +29,7 @@ function persistNow() {
   try { localStorage.setItem(KEY, JSON.stringify(D)); storageOK = true; setSaved("Enregistré"); }
   catch (err) { storageOK = false; setSaved("Échec de l'enregistrement : exporte tes données"); }
 }
-function persist() { setSaved("Enregistrement…"); clearTimeout(saveTimer); saveTimer = setTimeout(persistNow, 250); }
+function persist() { PLAN_CACHE = {}; setSaved("Enregistrement…"); clearTimeout(saveTimer); saveTimer = setTimeout(persistNow, 250); }
 document.addEventListener("visibilitychange", function () { if (document.visibilityState === "hidden" && saveTimer) persistNow(); });
 window.addEventListener("pagehide", function () { if (saveTimer) persistNow(); });
 if (navigator.storage && navigator.storage.persist) { try { navigator.storage.persist(); } catch (err) {} }
@@ -251,7 +251,7 @@ function clampWeek(w) { return Math.min(P.semaines, Math.max(1, w)); }
 function versionKeys() { return keysOf(P.versions); }
 function weekDocId(w) { return P.id + "-S" + w; }
 function weekDoc(w, create) { var id = weekDocId(w); if (!D.semaines[id] && create) D.semaines[id] = { programme: P.id, semaine: w }; return D.semaines[id]; }
-function versionOf(w) { var ks = versionKeys(); if (ks.length === 1) return ks[0]; var d = weekDoc(w); return d && d.version ? d.version : null; }
+function versionOf(w) { var ks = versionKeys(); if (ks.length === 1) return ks[0]; var d = weekDoc(w); return d && d.version && P.versions[d.version] ? d.version : versionFromFlex(); }
 function initialDate() { var t = todayStr(); if (P && t < P.debut) return P.debut; return t; }
 /* Jours couverts par le bloc ; en dehors, et sans programme, l'application fonctionne en séances libres */
 function inBlock(date) { return !!P && date >= P.debut && date <= lastDay(); }
@@ -261,7 +261,7 @@ function anyData(date) { return valuesOf(D.seances).some(function (s) { return s
 function sessionLabel(s) { if (s.type === LIBRE) return "Séance libre"; if (isCardioType(s.type)) return cardioTitle(s); if (s.plan) return s.plan.short; var d = sessionDef(s.type); return d ? d.short || d.name : s.type; }
 
 function plannedFor(date) {
-  var base = plannedBase(date); if (base === null) return null;
+  var base = autoOn() && inBlock(date) ? autoPlanned(date) : plannedBase(date); if (base === null) return null;
   compPlanned(date).forEach(function (t) { if (base.indexOf(t) < 0) base.push(t); });
   if (D.avances) base = base.filter(function (t) { return !D.avances[date + "_" + t]; });
   return base;
@@ -418,7 +418,7 @@ function dialog(title, bodyHtml, actions) {
 
 /* ================= Rendu ================= */
 function render() {
-  var y = window.scrollY;
+  var y = window.scrollY; PLAN_CACHE = {};
   applyTheme();
   renderMasthead();
   var tabs = document.getElementById("tabs");
@@ -534,8 +534,10 @@ function viewJour() {
   h += '<p class="small muted">' + esc(weekLabel(date)) + "</p>";
   if (P && todayStr() < P.debut && date === P.debut) h += '<div class="note info">Le bloc commence le ' + esc(fmtLong(P.debut)) + ". Voici la première séance.</div>";
   if (!isStandalone && !D.astuceVue) h += '<div class="note info row"><span class="grow">Installe l\'application sur ton écran d\'accueil pour l\'utiliser sans réseau et protéger tes données.</span><button type="button" class="btn small" data-act="view" data-v="reglages" data-r="ecran">Comment faire</button></div>';
-  if (plan === null && P && P.question) h += choiceSheet(w);
+  if (plan === null && P && (P.question || versionKeys().length > 1)) h += choiceSheet(w);
   h += weightSheet(date);
+  h += flexAsk(date) + autoTodayNote(date);
+  if (autoOn() && inBlock(date) && date > todayStr()) h += '<div class="note info">Prévision : le carnet ajuste la séance de ce jour selon tes réponses et tes séances d\'ici là.</div>';
   var types = (plan || compPlanned(date)).slice();
   valuesOf(D.seances).forEach(function (s) { if (s.date === date && types.indexOf(s.type) < 0 && s.type !== LIBRE && !isCardioType(s.type) && (sessionDef(s.type) || (hasData(s) && defOf(s)))) types.push(s.type); });
   if (!types.length && plan !== null && !libreOf(date) && !cardioOf(date).length) h += freeSheet(date);
@@ -544,6 +546,7 @@ function viewJour() {
   types.forEach(function (t) { if (!isReplaced(date, t)) h += sessionSheet(date, t, w); });
   if (libreOf(date)) h += libreSheet(date);
   cardioOf(date).forEach(function (s) { h += cardioSheet(date, s); });
+  if (date === todayStr()) h += weekCard(date);
   h += addSheet(date, types);
   h += claudeSheet("jour");
   return h;
@@ -562,10 +565,12 @@ function weekLabel(date) {
   var w = weekOf(date); if (w > P.semaines || date > lastDay()) return "Après la fin du bloc : séances libres";
   var v = versionOf(w), t = "Semaine " + w;
   if (P.deload && P.deload.indexOf(w) >= 0) t += ", décharge";
-  if (versionKeys().length > 1) t += v ? ", " + P.versions[v].label.toLowerCase() : ", version à choisir";
+  if (versionKeys().length > 1 && !autoOn()) t += v ? ", " + P.versions[v].label.toLowerCase() : ", version à choisir";
   return t;
 }
 function choiceSheet(w) {
+  if (!P.question) return '<div class="sheet"><h2>Organisation de cette semaine</h2><p class="small muted">Choisis la semaine du programme qui correspond à tes jours d\'entraînement. Tu peux aussi laisser le carnet ajuster chaque jour (menu, Planning de la semaine).</p><div class="seg stack" role="group">' +
+    versionKeys().map(function (k) { return '<button type="button" data-act="version" data-w="' + w + '" data-v="' + esc(k) + '">' + esc(P.versions[k].label) + "</button>"; }).join("") + "</div></div>";
   return '<div class="sheet"><h2>' + esc(P.question.texte) + "</h2>" + (P.question.aide ? '<p class="small muted">' + esc(P.question.aide) + "</p>" : "") + '<div class="row">' +
     P.question.options.map(function (o, i) { return '<button type="button" class="btn ' + (i === 0 ? "primary" : "") + '" data-act="version" data-w="' + w + '" data-v="' + esc(o.v) + '">' + esc(o.l) + "</button>"; }).join("") + "</div></div>";
 }
@@ -1603,7 +1608,7 @@ function viewSemaine() {
   h += '<p class="small muted">Du ' + esc(fmtLong(mon)) + " au " + esc(fmtLong(sun)) + (blk && P.deload && P.deload.indexOf(w) >= 0 ? ", semaine de décharge" : "") + "." + (!blk && P ? " En dehors du bloc : séances libres." : "") + "</p>";
   var cur = weekAvg(mon), prev = weekAvg(addDays(mon, -7)), sports = valuesOf(D.seances).filter(function (s) { return s.date >= mon && s.date <= sun && s.intensite; });
   var sheet = '<div class="sheet">';
-  if (blk && versionKeys().length > 1) sheet += '<div class="scale"><div class="scale-q"><span>Organisation de la semaine</span></div>' + seg("semaines", id, "version", versionKeys().map(function (k) { return { v: k, l: P.versions[k].label }; }), wd.version) + "</div>";
+  if (blk && versionKeys().length > 1 && !autoOn()) sheet += '<div class="scale"><div class="scale-q"><span>Organisation de la semaine</span></div>' + seg("semaines", id, "version", versionKeys().map(function (k) { return { v: k, l: P.versions[k].label }; }), wd.version) + "</div>";
   var sw = sleepWeek(mon);
   sheet += '<div class="kpis two"><div class="kpi"><b>' + fmt(cur, 2) + '</b><span>poids moyen (kg)</span></div><div class="kpi"><b>' + (cur && prev ? (cur - prev >= 0 ? "+" : "") + fmt(cur - prev, 2) : "–") + "</b><span>" + esc(blk && P.poidsCibleTexte || "écart avec la semaine d'avant") + '</span></div><div class="kpi"><b>' + fmtHours(sw.avg) + "</b><span>sommeil moyen" + (sw.n ? ", " + sw.n + " nuit" + (sw.n > 1 ? "s" : "") : "") + '</span></div><div class="kpi"><b>' + countDone(mon, sun) + "</b><span>séances notées</span></div></div>";
   if (sports.length) sheet += '<p class="small muted">Intensité des séances de ' + esc((P && P.sessions.SAMBO && P.sessions.SAMBO.name || "sport").toLowerCase()) + " : " + esc(sports.map(function (s) { return s.intensite.toLowerCase(); }).join(", ")) + ".</p>";
@@ -1924,6 +1929,7 @@ function chart(series, opt) {
 var RUBS = [
   { g: "Programme", k: "prog", t: "Mon programme" }, { k: "creer", t: "Créer un programme", d: "Musculation, course ou mixte" },
   { g: "Affichage", k: "apparence" },
+  { g: "Entraînement", k: "planning", t: "Planning de la semaine", d: "" },
   { g: "Profil", k: "profil", t: "Profil cardio", d: "Âge, fréquence cardiaque" }, { k: "disc", t: "Disciplines", d: "Activités cardio proposées" },
   { k: "alertes", t: "Alertes de surmenage", d: "Règle des 10 %, fatigue" }, { k: "courbes", t: "Courbes de force", d: "Exercices suivis dans Progrès" },
   { g: "Données", k: "sauv", t: "Sauvegarde", d: "Exporter ou restaurer" }, { k: "ecran", t: "Écran d'accueil", d: "Installer l'application" },
@@ -1959,6 +1965,7 @@ function rubBody(k) {
   switch (k) {
     case "prog": return reglProg();
     case "creer": return reglCreer();
+    case "planning": return planSheetReglage();
     case "profil": return noH2(profilSheet());
     case "disc": return noH2(sportsSheet());
     case "alertes": return noH2(alertesSheet());
@@ -1994,6 +2001,7 @@ function menuHtml() {
     if (r.k === "prog") d = P ? (P.titre || "Programme") + " · lien du coach" : "Coller le lien de ton coach";
     if (r.k === "creer") { var n = keysOf(D.brouillons || {}).length; if (n) d += " · " + n + " en préparation"; }
     if (r.k === "ecran" && isStandalone) d = "Application installée";
+    if (r.k === "planning") { d = planMode() === "auto" ? "Le carnet ajuste chaque jour" : "Jours fixes du programme"; if (P && flexTypes()[0]) { var ff = flexOf(flexTypes()[0]); d += " · " + P.sessions[flexTypes()[0]].name.toLowerCase() + " " + ff.fois + " fois"; } }
     h += '<div class="acc' + (op ? " open" : "") + (r.cls ? " " + r.cls : "") + '"><button type="button" class="acc-h" id="acc-' + r.k + '" data-m="acc" data-r="' + r.k + '" aria-expanded="' + op + '"' + (op ? ' aria-controls="accb-' + r.k + '"' : "") + '><span class="tw" aria-hidden="true"></span><span><b>' + esc(r.t) + "</b>" + (op ? "" : '<span class="small">' + esc(d) + "</span>") + "</span></button>" +
       (op ? '<div class="acc-b" id="accb-' + r.k + '" role="region" aria-labelledby="acc-' + r.k + '">' + rubBody(r.k) + "</div>" : "") + "</div>";
   });
@@ -3387,6 +3395,365 @@ function alertesSheet() {
     '<p class="tiny muted">Normale : questionnaire 0,5 point sous ta moyenne 2 séances de suite, nuits 45 min plus courtes que d\'habitude, ou même douleur 2 fois en 7 jours. Ces seuils sont des choix de l\'application : aucune étude ne les fixe.</p></section>';
 }
 
+/* ================= Planning de la semaine : le carnet ajuste chaque jour ================= */
+/* Règles de récupération, appliquées à tous les programmes :
+   - 48 h entre deux séances des mêmes muscles (haut/haut, bas/bas) ;
+   - 24 h entre le bas du corps et le fractionné (Sporer et Wenger 2003 ; Robineau et al. 2016) ;
+   - pas de séance dure des jambes la veille d'un sport intense, pas de fractionné dans les 24 h autour ;
+   - au moins un jour de repos par semaine. */
+var HAUT_M = { biceps: 1, triceps: 1, epaules: 1, pecs: 1, dorsal: 1, trapezes: 1 }, BAS_M = { quadri: 1, ischios: 1, mollets: 1 };
+var PLAN_CACHE = {};
+function planMode() { return (D.planning && D.planning.mode) === "fixe" ? "fixe" : "auto"; }
+function autoOn() { return !!(P && P.versions && planMode() === "auto"); }
+function zonesOf(list) {
+  var h = 0, b = 0, t = 0;
+  list.forEach(function (x) { var mu = x.mu || {}; keysOf(mu).forEach(function (k) { var v = (mu[k] || 0) * (x.n || 1); t += v; if (HAUT_M[k]) h += v; else if (BAS_M[k]) b += v; }); });
+  return t ? { haut: h / t >= 0.3, bas: b / t >= 0.3 } : { haut: false, bas: false };
+}
+function courseEntry(d, w) { if (!d.plan) return null; return d.custom ? d.plan[w - 1] : d.plan[w - 1] || d.plan[d.plan.length - 1]; }
+function profDef(t, d, w) {
+  var p = { t: t, haut: false, bas: false, frac: false, long: false, sport: false, dur: false, fixe: false };
+  if (!d) return p;
+  if (d.kind === "muscu") { var z = zonesOf((d.ex || []).map(function (e) { return { mu: (e.cat && CAT[e.cat] && CAT[e.cat].mu) || e.mu, n: (e.sets && e.sets[w - 1]) || 1 }; })); p.haut = z.haut; p.bas = z.bas; }
+  else if (d.kind === "course") {
+    var e = courseEntry(d, w) || {};
+    if (e.chrono && e.chrono.race) p.fixe = true;
+    if (!d.custom || e.test6 || e.chrono || e.ctype === "fractionne" || e.role === "vma" || e.role === "allure") p.frac = true;
+    else if (e.role === "sl") p.long = true;
+  } else if (d.kind === "sport") p.sport = true;
+  else if (d.kind === "tests" || d.kind === "mensu") p.fixe = true;
+  p.dur = p.frac || p.sport;
+  return p;
+}
+function profOf(t, w) { return profDef(t, sessionDef(t), w); }
+/* Ce qui a vraiment été fait un jour donné (toutes séances confondues) */
+function dayActual(date) {
+  var a = null;
+  function add(p) { if (!p) return; a = a || { haut: false, bas: false, frac: false, long: false, sport: false, dur: false, names: [] }; ["haut", "bas", "frac", "long", "sport", "dur"].forEach(function (k) { a[k] = a[k] || !!p[k]; }); if (p.name) a.names.push(p.name); }
+  valuesOf(D.seances).forEach(function (s) {
+    if (s.date !== date) return;
+    if (s.smod && s.smod.statut) { var pr = s.smod.par || {}; if (s.smod.statut === "remplace" && pr.k === "sport") add({ sport: true, dur: pr.intensite !== "Légère", name: pr.nom || "Autre sport" }); return; }
+    if (!hasData(s)) return;
+    if (s.type === LIBRE) { var z = zonesOf((s.liste || []).map(function (it) { var c = CAT[it.k]; return { mu: c ? c.mu : null, n: 1 }; })); add({ haut: z.haut, bas: z.bas, name: "Séance libre" }); return; }
+    if (isCardioType(s.type)) { var ci = cardioInfo(s) || {}; add({ frac: ci.ctype === "fractionne", dur: ci.ctype === "fractionne", name: cardioTitle(s) }); return; }
+    var w = s.semaine || (P && inBlock(date) ? weekOf(date) : 1), d = s.plan ? { kind: "muscu", ex: s.plan.ex.map(function (x) { return { mu: x.mu, cat: x.cat, sets: [] }; }) } : sessionDef(s.type);
+    var p = profDef(s.type, d || defOf(s), w); p.name = shortName(s.type); add(p);
+  });
+  return a;
+}
+function doneTypes(date) {
+  var out = [];
+  valuesOf(D.seances).forEach(function (s) { if (s.date === date && P && P.sessions[s.type] && (hasData(s) && !(s.smod && s.smod.statut === "saute")) && !(s.smod && s.smod.statut === "remplace")) out.push(s.type); });
+  if (P) keysOf(P.sessions).forEach(function (t) { if (replacedDone(date, t) && out.indexOf(t) < 0) out.push(t); });
+  return out;
+}
+function plj(date, create) { D.plj = D.plj || {}; if (!D.plj[date] && create) D.plj[date] = {}; return D.plj[date] || {}; }
+/* Sports à jours variables */
+function flexTypes() { return P ? keysOf(P.sessions).filter(function (t) { return P.sessions[t].kind === "sport"; }) : []; }
+function flexOf(t) {
+  var st = D.planning && D.planning.sports && D.planning.sports[P.id + ":" + t]; if (st) return st;
+  var d = P.sessions[t] || {}; if (d.flex) return d.flex;
+  var days = {}, n = 0;
+  keysOf(P.versions).forEach(function (k, i) { var c = 0; P.versions[k].jours.forEach(function (j, di) { if (j.indexOf(t) >= 0) { days[di] = 1; c++; } }); if (i === 0) n = c; });
+  return { fois: n || 1, jours: keysOf(days).map(Number).sort() };
+}
+/* Séances de la semaine (modèle), hors repos et séances à jour fixe */
+function weekItems(w) {
+  var k0 = keysOf(P.versions)[0], items = [];
+  P.versions[k0].jours.forEach(function (j) { j.forEach(function (t) {
+    var opt = t.slice(-1) === "?", b = opt ? t.slice(0, -1) : t, d = P.sessions[b];
+    if (!d || b === "REPOS" || d.kind === "repos" || d.kind === "sport" || planSkip(P, b, w)) return;
+    var p = profOf(b, w); if (p.fixe) return;
+    items.push({ t: b, opt: opt });
+  }); });
+  flexTypes().forEach(function (t) { var f = flexOf(t); for (var i = 0; i < (f.fois || 0); i++) items.push({ t: t, flex: true }); });
+  return items;
+}
+function prioOf(it, w) {
+  if (it.flex) return 100;
+  if (it.opt) return 4;
+  var pr = P.priorites; if (pr && pr.indexOf(it.t) >= 0) return 60 - 6 * pr.indexOf(it.t);
+  var p = profOf(it.t, w), d = sessionDef(it.t) || {};
+  if (d.kind === "muscu") return P.run ? 12 : 40 - (p.haut && !p.bas ? 0 : 4);
+  if (p.frac || p.long) return 34;
+  return 20;
+}
+function pairRule(a, b) {
+  if (!a || !b) return null;
+  if (a.haut && b.haut) return { c: Infinity, why: "deux séances du haut du corps à moins de 48 h" };
+  if (a.bas && b.bas) return { c: Infinity, why: "deux séances du bas du corps à moins de 48 h" };
+  if (a.frac && b.frac) return { c: 5, why: "deux séances de fractionné à moins de 48 h" };
+  if ((a.bas && b.frac) || (a.frac && b.bas)) return { c: 4, why: "bas du corps et fractionné à moins de 24 h d'écart" };
+  if (a.bas && b.sport) return { c: 4, why: "bas du corps la veille d'un sport intense" };
+  if ((a.frac && b.sport) || (a.sport && b.frac)) return { c: 3, why: "fractionné à moins de 24 h d'un sport intense" };
+  if ((a.long && b.frac) || (a.frac && b.long)) return { c: 3, why: "sortie longue et fractionné à moins de 24 h" };
+  if (a.sport && b.bas) return { c: 1, why: "bas du corps le lendemain d'un sport intense" };
+  if (a.sport && b.haut) return { c: 0.5, why: "" };
+  if (a.haut && b.sport) return { c: 0.5, why: "" };
+  return null;
+}
+function pairCost(a, b) { var r = pairRule(a, b); return r ? r.c : 0; }
+function sameDay(a, b) { if (!a || !b) return 0; if ((a.haut && b.haut) || (a.bas && b.bas) || (a.bas && b.frac) || (a.frac && b.bas) || (a.frac && b.sport) || (a.sport && b.frac) || (a.bas && b.sport) || (a.sport && b.bas)) return Infinity; return 0; }
+function mergeP(a, b) { if (!a) return b; if (!b) return a; var o = {}; ["haut", "bas", "frac", "long", "sport", "dur"].forEach(function (k) { o[k] = !!(a[k] || b[k]); }); return o; }
+/* Calcul de la semaine : ce qui est fait, ce qui reste, et la meilleure façon de placer le reste */
+function flexUnknown(date) {
+  if (date !== todayStr()) return false; var ft = flexTypes()[0]; if (!ft) return false;
+  var pj = plj(date); return !pj.sambo && !pj.choix && flexOf(ft).jours.indexOf(dow(date)) >= 0 && !dayActual(date);
+}
+/* nf : aujourd'hui sans le sport à jours variables (réponse pas encore donnée) */
+function weekPlan(mon, nf) {
+  if (nf === undefined) nf = flexUnknown(todayStr()) && mondayOfDate(todayStr()) === mon;
+  var key = mon + "|" + todayStr() + "|" + (nf ? 1 : 0); if (PLAN_CACHE[key]) return PLAN_CACHE[key];
+  var today = todayStr(), w = weekOf(mon), days = [], items = weekItems(w), done = [], fixed = {};
+  for (var i = 0; i < 7; i++) days.push(addDays(mon, i));
+  /* fixes : mensurations, tests, jour de course */
+  days.forEach(function (d) { (plannedBaseFixed(d) || []).forEach(function (t) { (fixed[d] = fixed[d] || []).push(t); }); });
+  /* séances faites (avant aujourd'hui, et aujourd'hui si déjà notée) */
+  var pool = items.map(function (x) { return x; });
+  days.forEach(function (d) {
+    if (d > today) return;
+    doneTypes(d).forEach(function (t) { for (var k = 0; k < pool.length; k++) if (pool[k].t === t) { done.push({ t: t, date: d }); pool.splice(k, 1); return; } });
+  });
+  var start = days.indexOf(today) >= 0 ? days.indexOf(today) : mon > today ? 0 : 7, hist = [], restDays = 0;
+  days.forEach(function (d, i) { if (i < start) { var a = dayActual(d); hist[i] = a; if (!a) restDays++; } });
+  var prevDay = dayActual(addDays(mon, -1));
+  /* aujourd'hui : séance déjà notée, choix imposé, réponse au sport */
+  var forced = {}, todayDone = start < 7 && start === days.indexOf(today) ? dayActual(today) : null;
+  if (start < 7 && days[start] === today) {
+    var pj = plj(today), ft = flexTypes()[0];
+    if (todayDone) forced[start] = { done: true, p: todayDone };
+    else if (pj.choix) forced[start] = pj.choix === "REPOS" ? { rest: true } : { t: pj.choix };
+    else if (pj.sambo === "oui" && ft) forced[start] = { t: ft };
+    else if (pj.sambo === "non" || nf) forced[start] = { noflex: true };
+  }
+  var free = []; for (var j = start; j < 7; j++) free.push(j);
+  var best = { cost: Infinity, asg: null }, W = w;
+  var uniq = function (arr) { var seen = {}; return arr.filter(function (x) { var k = x.t + (x.flex ? "f" : ""); if (seen[k]) return false; seen[k] = 1; return true; }); };
+  function profIt(it) { return profOf(it.t, W); }
+  function dfs(k, left, asg, cost, prevP, rests, extra) {
+    if (cost >= best.cost) return;
+    if (k === free.length) {
+      var drop = 0; left.forEach(function (x) { drop += prioOf(x, W); });
+      var noRest = rests === 0 ? 30 : 0;
+      var tot = cost + drop + noRest;
+      if (tot < best.cost) best = { cost: tot, asg: asg.slice(), left: left.slice() };
+      return;
+    }
+    var di = free[k], dte = days[di], fx = fixed[dte] || [], f = forced[di], fxP = null;
+    fx.forEach(function (t) { fxP = mergeP(fxP, profOf(t, W)); });
+    function place(it, idx) {
+      var p = it ? profIt(it) : null, all = mergeP(p, fxP), c = pairCost(prevP, all) + (it ? sameDay(p, fxP) : 0);
+      /* risque : séance dure des jambes la veille d'un jour où le sport est possible et pas encore placé */
+      if (p && (p.bas || p.frac) && di < 6 && dte === today) {
+        var nxt = (di + 1) % 7, fl = flexTypes()[0];
+        if (fl && flexOf(fl).jours.indexOf(nxt) >= 0 && left.some(function (x) { return x.flex; })) c += 1.5;
+      }
+      if (it && it.flex && flexOf(it.t).jours.indexOf(di) < 0) return;
+      if (it && it.flex && f && f.noflex) return;
+      if (c === Infinity) return;
+      var nl = left.slice(); if (idx >= 0) nl.splice(idx, 1);
+      asg[di] = it ? it.t : null;
+      dfs(k + 1, nl, asg, cost + c, all, rests + (all ? 0 : 1), extra);
+      asg[di] = undefined;
+    }
+    if (f && f.done) { asg[di] = "__done"; dfs(k + 1, left, asg, cost + pairCost(prevP, f.p), f.p, rests, extra); asg[di] = undefined; return; }
+    if (f && f.rest) { place(null, -1); return; }
+    if (f && f.t) {
+      var ix = -1; for (var q = 0; q < left.length; q++) if (left[q].t === f.t) { ix = q; break; }
+      var it0 = ix >= 0 ? left[ix] : { t: f.t, flex: P.sessions[f.t] && P.sessions[f.t].kind === "sport", extra: true };
+      var p0 = profIt(it0), all0 = mergeP(p0, fxP), nl0 = left.slice(); if (ix >= 0) nl0.splice(ix, 1);
+      asg[di] = f.t; dfs(k + 1, nl0, asg, cost + Math.min(pairCost(prevP, all0), 50), all0, rests, extra); asg[di] = undefined; return;
+    }
+    uniq(left).forEach(function (it) { place(it, left.indexOf(it)); });
+    place(null, -1);
+  }
+  var pv = start > 0 ? hist[start - 1] : prevDay;
+  dfs(0, pool, [], 0, pv, restDays, 0);
+  var asg = best.asg || [], res = { mon: mon, w: w, days: days, start: start, hist: hist, done: done, fixed: fixed, asg: asg, left: best.left || pool, pool: pool, cost: best.cost, forced: forced };
+  PLAN_CACHE[key] = res;
+  return res;
+}
+function plannedBaseFixed(date) {
+  if (!P || date < P.debut) return [];
+  if (P.testDay && date === P.testDay) return ["TESTS"];
+  var out = [], w = weekOf(date); if (w > P.semaines) return [];
+  if (date === P.debut && P.sessions.MENSU && !P.cree) out.push("MENSU");
+  var k0 = keysOf(P.versions)[0], d = dow(date);
+  (P.versions[k0].jours[d] || []).forEach(function (t) { if (P.sessions[t] && !planSkip(P, t, w) && profOf(t, w).fixe && t !== "MENSU" && t !== "TESTS") out.push(t); });
+  return out;
+}
+/* Ce que le carnet prévoit un jour donné, en mode « ajuste chaque jour » */
+function autoPlanned(date) {
+  if (P.testDay && date === P.testDay) return ["TESTS"];
+  var w = weekOf(date); if (w > P.semaines) return [];
+  var today = todayStr(), mon = mondayOfDate(date), out = (plannedBaseFixed(date) || []).slice();
+  if (date < today) {
+    doneTypes(date).forEach(function (t) { if (out.indexOf(t) < 0) out.push(t); });
+    valuesOf(D.seances).forEach(function (s) { if (s.date === date && P.sessions[s.type] && s.smod && s.smod.statut && out.indexOf(s.type) < 0) out.push(s.type); });
+    var pj = plj(date); if (pj.propose && out.indexOf(pj.propose) < 0 && !doneTypes(date).length) out.push(pj.propose);
+    return out;
+  }
+  var wp = weekPlan(mon), di = dow(date), t = wp.asg[di];
+  if (t && t !== "__done" && out.indexOf(t) < 0) out.push(t);
+  doneTypes(date).forEach(function (x) { if (out.indexOf(x) < 0) out.push(x); });
+  if (date === today) {
+    var pj2 = plj(today), prop = t && t !== "__done" ? t : null;
+    if ((pj2.propose || null) !== prop && !doneTypes(date).length) { plj(today, true).propose = prop; persist(); }
+  }
+  return out;
+}
+/* ---------- Écrans ---------- */
+function flexAsk(date) {
+  if (!autoOn() || date !== todayStr() || !inBlock(date)) return "";
+  var ft = flexTypes()[0]; if (!ft) return "";
+  var f = flexOf(ft), di = dow(date); if (f.jours.indexOf(di) < 0) return "";
+  if (dayActual(date) && !(plj(date).sambo)) return "";
+  var wp = weekPlan(mondayOfDate(date)), doneN = wp.done.filter(function (x) { return x.t === ft; }).length, pj = plj(date), nm = P.sessions[ft].name;
+  var extra = doneN >= (f.fois || 0);
+  if (extra && pj.sambo !== "oui" && doneN > (f.fois || 0)) return "";
+  var h = '<section class="sheet"><div class="sheet-head"><h2>' + esc(nm) + " ce soir ?</h2></div>";
+  h += '<p class="small muted">' + (extra ? "Ce serait ton " + (doneN + 1) + "e de la semaine : le carnet retirera la séance la moins prioritaire pour garder un jour de repos." : "Tu peux y aller " + joursTxt(f.jours) + ". Réponds quand tu sais, même en fin de journée : la semaine s'ajuste.") + "</p>";
+  if (!pj.sambo && !extra) { var fr = weekPlan(mondayOfDate(date), false), nfp = weekPlan(mondayOfDate(date), true); if (fr.asg[di] === ft && fr.cost + 2 < nfp.cost) h += '<p class="small"><b>Conseil :</b> ce soir est un bon soir pour y aller, la fin de semaine se place mieux.</p>'; }
+  h += '<div class="seg" role="group">' + [["oui", "Oui"], ["non", "Non"], ["", "Je ne sais pas encore"]].map(function (o) { return '<button type="button" data-act="flexans" data-v="' + o[0] + '" aria-pressed="' + ((pj.sambo || "") === o[0]) + '">' + o[1] + "</button>"; }).join("") + "</div>";
+  return h + "</section>";
+}
+var JOURS_L = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"];
+function joursTxt(js) { var l = js.slice().sort().map(function (i) { return JOURS_L[i]; }); return l.length > 1 ? l.slice(0, -1).join(", ") + " ou " + l[l.length - 1] : l[0] || ""; }
+function lastWith(date, pred) { for (var i = 1; i <= 7; i++) { var d = addDays(date, -i), a = dayActual(d); if (a && pred(a)) return { d: d, a: a, n: i }; } return null; }
+function whyToday(date, t) {
+  var w = weekOf(date), p = profOf(t, w), y = dayActual(addDays(date, -1)), out = [];
+  if (p.haut) { var lh = lastWith(date, function (a) { return a.haut; }); out.push(lh ? (lh.n === 2 ? "48 h" : lh.n + " jours") + " depuis ta dernière séance du haut du corps" : "pas de séance du haut du corps ces derniers jours"); }
+  if (p.bas) { var lb = lastWith(date, function (a) { return a.bas || a.frac; }); if (lb && lb.n >= 2) out.push(lb.n + " jours depuis ta dernière séance dure des jambes"); }
+  var wp = weekPlan(mondayOfDate(date));
+  uniqT(wp.left.concat(wp.pool)).forEach(function (o) { if (o === t || (P.sessions[o] && P.sessions[o].kind === "sport")) return; var r = pairRule(y, profOf(o, w)); if (r && r.c >= 3 && out.length < 3) out.push(shortName(o) + " attend : " + r.why); });
+  return out.length ? out.join(" ; ") + "." : "";
+}
+function uniqT(arr) { var s = {}, o = []; arr.forEach(function (x) { var t = x.t || x; if (!s[t]) { s[t] = 1; o.push(t); } }); return o; }
+function autoTodayNote(date, types) {
+  if (!autoOn() || date !== todayStr() || !inBlock(date)) return "";
+  var wp = weekPlan(mondayOfDate(date)), di = dow(date), t = wp.asg[di], pj = plj(date), h = "";
+  var y = addDays(date, -1), yp = plj(y);
+  if (y >= P.debut && yp.propose && !doneTypes(y).length && !(seance(y, yp.propose) && seance(y, yp.propose).smod) && !yp.vu)
+    h += '<section class="sheet"><div class="sheet-head"><h2>Hier</h2></div><p class="small"><b>' + esc(shortName(yp.propose)) + " était proposée, rien n'est noté.</b> Faite ou sautée ?</p>" +
+      '<div class="row"><button type="button" class="btn" data-act="hiernote" data-date="' + y + '">Je la note</button><button type="button" class="btn" data-act="hiersaute" data-date="' + y + '" data-t="' + esc(yp.propose) + '">Sautée</button></div><p class="tiny muted">« Sautée » : hier compte comme un jour de repos.</p></section>';
+  var lastSkip = seance(y, yp.propose || "") || null;
+  if (lastSkip && lastSkip.smod && lastSkip.smod.statut === "saute" && !dayActual(y) && !dayActual(date)) h += '<div class="note info"><b>Hier compte comme repos.</b> Tu peux t\'entraîner aujourd\'hui.</div>';
+  if (t && t !== "__done" && !doneTypes(date).length) {
+    var flexT = flexTypes()[0], isFlex = t === flexT, why = isFlex ? "" : whyToday(date, t);
+    var label = pj.choix ? "Choisie par toi" + (pj.force ? ", malgré le conseil" : "") : (!isFlex && flexAsk(date) && !pj.sambo ? "Proposée si pas de " + esc((P.sessions[flexT] || {}).name || "sport").toLowerCase() : "Proposée aujourd'hui");
+    h += '<div class="note info stack"><p><b>' + esc(shortName(t)) + " : " + label + ".</b>" + (why ? " Pourquoi : " + esc(why) : "") + '</p><div><button type="button" class="linkbtn" data-act="autreseance">Choisir une autre séance</button>' + (pj.choix ? ' <button type="button" class="linkbtn" data-act="autreraz">Revenir à la proposition</button>' : "") + "</div></div>";
+  } else if (!t && !doneTypes(date).length && !dayActual(date)) {
+    h += '<div class="note ok stack"><p><b>' + (flexUnknown(date) ? "Si pas de " + esc(P.sessions[flexTypes()[0]].name.toLowerCase()) + " ce soir : repos conseillé." : "Repos conseillé aujourd\'hui.") + "</b> " + (pj.choix === "REPOS" ? "Tu l'as choisi." : "C'est ce qui laisse le plus de place aux séances qui restent, en respectant la récupération.") + '</p><div><button type="button" class="linkbtn" data-act="autreseance">Choisir une séance quand même</button></div></div>';
+  }
+  if (wp.left.length) {
+    var lt = uniqT(wp.left).filter(function (x) { return !(P.sessions[x] && P.sessions[x].kind === "sport"); });
+    if (lt.length) h += '<div class="note warn stack"><p><b>' + esc(lt.map(shortName).join(", ")) + (lt.length > 1 ? " ne rentrent" : " ne rentre") + " plus cette semaine.</b> Il ne reste pas assez de jours en respectant les temps de récupération et un jour de repos. Conseil : " + (lt.length > 1 ? "elles sont abandonnées" : "elle est abandonnée") + ", la semaine prochaine repart normalement.</p><div class=\"row\">" +
+      lt.map(function (x) { return '<button type="button" class="btn small quiet" data-act="forcer" data-t="' + esc(x) + '">Faire ' + esc(shortName(x)) + " aujourd'hui quand même</button>"; }).join("") + "</div></div>";
+  }
+  return h;
+}
+function weekCard(date) {
+  if (!autoOn() || !inBlock(date)) return "";
+  var mon = mondayOfDate(date), wp = weekPlan(mon), today = todayStr(), h = '<section class="sheet"><div class="sheet-head"><h2>Cette semaine</h2></div><div class="wk">';
+  wp.days.forEach(function (d, i) {
+    var st, names;
+    if (d < today || (d === today && dayActual(d))) {
+      var a = dayActual(d), sk = valuesOf(D.seances).filter(function (s) { return s.date === d && s.smod && s.smod.statut === "saute"; });
+      names = a ? a.names.join(", ") : sk.length ? sk.map(function (s) { return shortName(s.type); }).join(", ") : "Repos";
+      st = a ? "✓ faite" : sk.length ? "sautée" : "repos";
+    } else {
+      var t = wp.asg[i], fx = wp.fixed[d] || [];
+      names = fx.concat(t && t !== "__done" ? [t] : []).map(shortName).join(", ") || "Repos";
+      st = d === today ? "aujourd'hui" : "prévision";
+    }
+    h += '<div class="wk-row' + (d === today ? " now" : "") + '"><span class="wk-d">' + esc(fmtDayName(d)) + " " + Number(d.slice(8)) + '</span><span class="wk-t">' + esc(names) + '</span><span class="wk-s">' + esc(st) + "</span></div>";
+  });
+  var reste = {}, ordre = [];
+  wp.pool.forEach(function (x) { if (!reste[x.t]) { reste[x.t] = 0; ordre.push(x.t); } reste[x.t]++; });
+  var asgToday = wp.asg.slice(wp.start);
+  var rest = ordre.map(function (t) { var n = reste[t]; return (n > 1 ? n + " × " : "") + shortName(t); });
+  h += '</div><p class="small"><b>Reste à faire :</b> ' + (rest.length ? esc(rest.join(", ")) : "rien, la semaine est complète") + ".</p>";
+  return h + '<p class="tiny muted">Pas de jour fixe : chaque jour, le carnet propose la séance qui respecte les temps de récupération, selon ce que tu as déjà fait. La suite de la semaine est une prévision.</p></section>';
+}
+function autreSheet(date) {
+  var wp = weekPlan(mondayOfDate(date)), w = wp.w, y = dayActual(addDays(date, -1)), di = dow(date), cur = wp.asg[di], rows = [];
+  var cand = uniqT(wp.pool).filter(function (t) { return !(P.sessions[t].kind === "sport"); });
+  function evalT(t) {
+    var p = profOf(t, w), r = pairRule(y, p), fx = null; (wp.fixed[date] || []).forEach(function (x) { fx = mergeP(fx, profOf(x, w)); });
+    if (sameDay(p, fx) === Infinity) return { st: "warn", why: "le même jour qu'une autre séance dure" };
+    if (r && r.c >= 3) return { st: "warn", why: r.why };
+    var nx = (di + 1) % 7, fl = flexTypes()[0];
+    if (fl && (p.bas || p.frac) && di < 6 && flexOf(fl).jours.indexOf(nx) >= 0 && wp.pool.some(function (x) { return x.t === fl; })) return { st: "warn", why: "veille d'un jour où tu pourrais aller au " + P.sessions[fl].name.toLowerCase() };
+    return { st: t === cur ? "ok" : "maybe", why: "" };
+  }
+  cand.forEach(function (t) { var e = evalT(t); rows.push({ t: t, st: e.st, why: e.why }); });
+  var h = '<h2 id="dlg-t">Choisir une autre séance</h2><div class="pick-list">';
+  rows.forEach(function (r) { h += '<button type="button" class="pick ' + r.st + '" data-sh="pick" data-t="' + esc(r.t) + '" data-st="' + r.st + '" data-why="' + esc(r.why) + '"><span><b>' + esc(sessionDef(r.t).name) + '</b><span class="small">' + esc(r.st === "ok" ? "Conseillée aujourd'hui." : r.st === "maybe" ? "Possible aujourd'hui." : "Déconseillée aujourd'hui : " + r.why + ".") + '</span></span><span class="chev" aria-hidden="true">›</span></button>'; });
+  h += '<button type="button" class="pick" data-sh="pick" data-t="REPOS" data-st="maybe"><span><b>Repos</b><span class="small">' + (cur ? "Possible : la séance proposée sera replacée plus tard si elle rentre." : "Conseillé aujourd'hui.") + '</span></span><span class="chev" aria-hidden="true">›</span></button>';
+  wp.done.forEach(function (x) { h += '<div class="pick off"><span><b>' + esc(sessionDef(x.t).name) + '</b><span class="small">Déjà faite ' + esc(JOURS_L[dow(x.date)]) + ".</span></span></div>"; });
+  h += '</div><p class="tiny muted">Tu peux choisir une séance déconseillée : le carnet te dira pourquoi avant de l\'ouvrir.</p><div><button type="button" class="btn wide" data-sh="cancel">Annuler</button></div>';
+  openSheet(h, function (b, close) {
+    if (b.dataset.sh === "cancel") { close(); return; }
+    var t = b.dataset.t;
+    if (b.dataset.st === "warn") { close(); forcerDialog(date, t, b.dataset.why, cur); return; }
+    close(); var pj = plj(date, true); pj.choix = t; delete pj.force; persist(); render(); window.scrollTo(0, 0);
+  }, true);
+}
+function forcerDialog(date, t, why, cur) {
+  var nm = t === "REPOS" ? "Repos" : sessionDef(t).name, alt = cur && cur !== t && cur !== "__done" ? cur : null;
+  var btns = [];
+  if (alt) btns.push({ label: "Faire " + shortName(alt) + " à la place", cls: "primary", run: function () { var pj = plj(date, true); pj.choix = alt; delete pj.force; persist(); render(); } });
+  else btns.push({ label: "Choisir autre chose", cls: "primary", run: function () { autreSheet(date); } });
+  btns.push({ label: "Faire " + shortName(t) + " quand même", run: function () { var pj = plj(date, true); pj.choix = t; pj.force = true; persist(); render(); window.scrollTo(0, 0); } });
+  dialog(nm + " aujourd'hui ?", '<p class="small">Déconseillé : ' + esc(why) + ". La séance risque d'être moins bonne et la fatigue de s'accumuler, avec un risque de surmenage si ça se répète.</p><p class=\"small\">C'est ton choix : le carnet le notera comme une séance faite malgré le conseil.</p>", btns);
+}
+function planAct(b) {
+  var a = b.dataset.act, today = todayStr();
+  if (a === "flexans") { var pj = plj(today, true), v = b.dataset.v || null; if (pj.sambo === v || !v) delete pj.sambo; else pj.sambo = v; delete pj.choix; delete pj.force; persist(); render(); return; }
+  if (a === "autreseance") { autreSheet(today); return; }
+  if (a === "autreraz") { var p2 = plj(today, true); delete p2.choix; delete p2.force; persist(); render(); return; }
+  if (a === "forcer") { var t = b.dataset.t, wp = weekPlan(mondayOfDate(today)); forcerDialog(today, t, "plus de place cette semaine sans enchaîner des séances qui se gênent", wp.asg[dow(today)]); return; }
+  if (a === "hiernote") { S.date = b.dataset.date; S.stripMon = mondayOfDate(S.date); render(); window.scrollTo(0, 0); return; }
+  if (a === "hiersaute") { var s = seance(b.dataset.date, b.dataset.t, true); s.smod = { statut: "saute" }; persist(); render(); return; }
+}
+function planSheetReglage() {
+  var mode = planMode(), h = '<p class="small muted">Valable pour tous tes programmes : celui de ton coach, ceux que tu crées, les programmes de course.</p>';
+  h += '<div class="scale"><div class="scale-q"><span>Jours des séances</span></div><div class="seg stack" role="group">' +
+    [["auto", "Le carnet ajuste chaque jour", "Adapté aux emplois du temps variables."], ["fixe", "Jours fixes du programme", "Idéal pour les entraînements réguliers."]].map(function (o) {
+      return '<button type="button" data-act="planmode" data-v="' + o[0] + '" aria-pressed="' + (mode === o[0]) + '"><b>' + o[1] + '</b><span class="tiny sub">' + o[2] + "</span></button>"; }).join("") + "</div></div>";
+  if (P) flexTypes().forEach(function (t) {
+    var f = flexOf(t);
+    h += '<p class="small"><b>' + esc(P.sessions[t].name) + " : jours variables</b></p>";
+    h += '<div class="scale"><div class="scale-q"><span>Combien de fois par semaine ?</span></div><div class="seg" role="group">' + [1, 2, 3].map(function (n) { return '<button type="button" data-act="flexfois" data-t="' + esc(t) + '" data-v="' + n + '" aria-pressed="' + (f.fois === n) + '">' + n + "</button>"; }).join("") + "</div></div>";
+    h += '<div class="scale"><div class="scale-q"><span>Jours possibles</span></div><div class="seg" role="group">' + ["lun", "mar", "mer", "jeu", "ven", "sam", "dim"].map(function (n, i) { return '<button type="button" data-act="flexjour" data-t="' + esc(t) + '" data-v="' + i + '" aria-pressed="' + (f.jours.indexOf(i) >= 0) + '">' + n + "</button>"; }).join("") + "</div></div>";
+    h += '<p class="tiny muted">' + (mode === "auto" ? "Ces jours-là, le carnet te demande « " + esc(P.sessions[t].name) + " ce soir ? »." : "En jours fixes, choisis exactement " + f.fois + " jour" + (f.fois > 1 ? "s" : "") + " : le carnet prend la semaine du programme qui correspond.") + "</p>";
+  });
+  if (P && P.versions) {
+    var its = weekItems(1).filter(function (x) { return !x.flex; }), seen = {}, ord = [];
+    its.sort(function (a, b) { return prioOf(b, 1) - prioOf(a, 1); }).forEach(function (x) { if (!seen[x.t]) { seen[x.t] = 1; ord.push(shortName(x.t)); } });
+    if (ord.length) h += '<p class="small"><b>Si une séance ne rentre plus</b></p><p class="small muted">Le carnet garde d\'abord : ' + esc(ord.join(", ")) + ". Les autres sont abandonnées pour la semaine, avec un avertissement si tu veux les faire quand même.</p>";
+  }
+  h += '<p class="small"><b>Règles appliquées</b></p><ul class="small rules"><li>48 h entre deux séances des mêmes muscles.</li><li>24 h entre bas du corps et fractionné.</li><li>Pas de séance dure des jambes la veille d\'un sport intense.</li><li>Au moins un jour de repos par semaine.</li></ul><p class="tiny muted">Le carnet les déduit des séances elles-mêmes : muscles travaillés, fractionné, sport intense.</p>';
+  return h;
+}
+function planRegAct(b) {
+  var a = b.dataset.act; D.planning = D.planning || {}; D.planning.sports = D.planning.sports || {};
+  if (a === "planmode") D.planning.mode = b.dataset.v;
+  else if (P) {
+    var t = b.dataset.t, key = P.id + ":" + t, f = JSON.parse(JSON.stringify(flexOf(t)));
+    if (a === "flexfois") f.fois = Number(b.dataset.v);
+    if (a === "flexjour") { var i = Number(b.dataset.v), k = f.jours.indexOf(i); if (k >= 0) f.jours.splice(k, 1); else f.jours.push(i); f.jours.sort(); }
+    D.planning.sports[key] = f;
+  }
+  PLAN_CACHE = {}; persist(); render();
+}
+/* En jours fixes : semaine du programme qui correspond aux jours choisis */
+function versionFromFlex() {
+  var ft = flexTypes()[0]; if (!ft) return null; var f = flexOf(ft), want = JSON.stringify(f.jours.slice().sort());
+  var ks = keysOf(P.versions).filter(function (k) { var j = []; P.versions[k].jours.forEach(function (x, i) { if (x.indexOf(ft) >= 0) j.push(i); }); return JSON.stringify(j) === want; });
+  return ks[0] || null;
+}
+
 /* ================= Séance sautée ou remplacée, questionnaire pour toutes les séances ================= */
 var MOTIFS_SMOD = [{ v: "fatigue", l: "Fatigue" }, { v: "douleur", l: "Douleur" }, { v: "temps", l: "Manque de temps" }, { v: "imprevu", l: "Imprévu" }, { v: "autre", l: "Autre" }];
 var INTENS_RPE = { "Légère": 3, "Normale": 5, "Très dure": 8 };
@@ -3454,7 +3821,7 @@ function smodRemp(date, type, def, s, id, nm) {
   h += "</div>";
   if (par.k === "prog" && par.t) {
     var o = opts.filter(function (x) { return x.t === par.t; })[0], d3 = sessionDef(par.t), sh = d3 ? d3.short || d3.name : par.t;
-    if (o && o.later) h += '<div class="scale"><div class="scale-q"><span>' + esc(sh) + " était prévue " + esc(fmtLong(o.later)) + '</span></div><div class="seg stack" role="group">' +
+    if (o && o.later && !autoOn()) h += '<div class="scale"><div class="scale-q"><span>' + esc(sh) + " était prévue " + esc(fmtLong(o.later)) + '</span></div><div class="seg stack" role="group">' +
       [["avance", "L'avancer à aujourd'hui : ce jour-là devient libre"], ["plus", "La faire en plus : ce jour-là ne change pas"]].map(function (x) { return '<button type="button" data-act="smodmode" data-id="' + esc(id) + '" data-v="' + x[0] + '" aria-pressed="' + ((par.mode || "avance") === x[0]) + '">' + esc(x[1]) + "</button>"; }).join("") + "</div></div>";
     h += '<button type="button" class="btn primary wide" data-act="smodgo" data-id="' + esc(id) + '">Commencer ' + esc(sh) + "</button>";
   }
@@ -3539,7 +3906,7 @@ function smodAct(b) {
   else if (a === "smodgo") {
     var par = s.smod.par, o = smodProgOptions(date, type).filter(function (x) { return x.t === par.t; })[0];
     var x = seance(date, par.t, true); x.ajoutee = true; x.pour = type;
-    if (o && o.later && (par.mode || "avance") === "avance") { D.avances = D.avances || {}; D.avances[o.later + "_" + par.t] = date; par.from = o.later; x.avanceDe = o.later; }
+    if (o && o.later && !autoOn() && (par.mode || "avance") === "avance") { D.avances = D.avances || {}; D.avances[o.later + "_" + par.t] = date; par.from = o.later; x.avanceDe = o.later; }
     par.started = true; persist(); render();
     var el = document.getElementById("sess-" + seanceId(date, par.t)); if (el) el.scrollIntoView({ block: "start" });
     return;
@@ -3732,6 +4099,8 @@ function onAct(ev) {
     case "today": S.date = initialDate(); S.stripMon = null; S.prompt = ""; render(); break;
     case "stripweek": stripWeek(Number(b.dataset.d)); break;
     case "menu": openMenu(); break;
+    case "flexans": case "autreseance": case "autreraz": case "forcer": case "hiernote": case "hiersaute": planAct(b); break;
+    case "planmode": case "flexfois": case "flexjour": planRegAct(b); break;
     case "smodopen": case "smodundo": case "smodprog": case "smodmode": case "smodautre": case "smodpret": case "smodgo": smodAct(b); break;
     case "view": D.astuceVue = true; persist(); if (b.dataset.v === "reglages") { openMenu(b.dataset.r); break; } S.view = b.dataset.v; render(); window.scrollTo(0, 0); break;
     case "week": S.mon = addDays(S.mon, 7 * Number(b.dataset.d)); render(); break;
