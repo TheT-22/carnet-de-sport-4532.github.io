@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.12.0";
+var APP_VERSION = "1.13.0";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -85,6 +85,10 @@ var CATALOGUE = [
     { k: "dm-halt", n: "Développé militaire, haltères", per: true, gr: "push", mu: { epaules: 1, triceps: 0.5 } },
     { k: "dips", n: "Dips", bw: true, gr: "push", mu: { pecs: 1, triceps: 0.5, epaules: 0.5 } },
     { k: "pompes", n: "Pompes", bw: true, bwf: 0.65, gr: "push", mu: { pecs: 1, triceps: 0.5, epaules: 0.5 } },
+    { k: "pompes-table", n: "Pompes inclinées, mains sur une table", bw: true, bwf: 0.41, gr: "push", mu: { pecs: 1, triceps: 0.5, epaules: 0.5 } },
+    { k: "pompes-genoux", n: "Pompes à genoux", bw: true, bwf: 0.49, gr: "push", mu: { pecs: 1, triceps: 0.5, epaules: 0.5 } },
+    { k: "pompes-chaise", n: "Pompes inclinées, mains sur une chaise", bw: true, bwf: 0.55, gr: "push", mu: { pecs: 1, triceps: 0.5, epaules: 0.5 } },
+    { k: "pompes-pieds", n: "Pompes pieds surélevés", bw: true, bwf: 0.7, gr: "push", mu: { pecs: 1, triceps: 0.5, epaules: 0.5 } },
     { k: "ecarte-poulie", n: "Écarté à la poulie", gr: "push", mu: { pecs: 1 } },
     { k: "pec-deck", n: "Pec deck", gr: "push", mu: { pecs: 1 } },
     { k: "el-lat", n: "Élévations latérales, haltères", per: true, gr: "push", mu: { epaules: 1 } },
@@ -120,11 +124,20 @@ var CATALOGUE = [
     { k: "hip-thrust", n: "Hip thrust", gr: "jambes", mu: { ischios: 0.5 } },
     { k: "leg-curl", n: "Leg curl", gr: "jambes", mu: { ischios: 1 } },
     { k: "mollets", n: "Mollets", gr: "jambes", mu: { mollets: 1 } },
+    { k: "squat-pdc", n: "Squat au poids du corps", bw: true, gr: "jambes", mu: { quadri: 1 } },
+    { k: "squat-lent", n: "Squat au poids du corps, descente en 4 s", bw: true, gr: "jambes", mu: { quadri: 1 } },
+    { k: "squat-1j", n: "Squat sur une jambe vers une chaise", bw: true, gr: "jambes", mu: { quadri: 1 } },
+    { k: "fentes-arr", n: "Fentes arrière", bw: true, gr: "jambes", mu: { quadri: 1 } },
+    { k: "fente-bulg-pdc", n: "Fente bulgare au poids du corps", bw: true, gr: "jambes", mu: { quadri: 1 } },
+    { k: "pont", n: "Pont fessier", bw: true, gr: "jambes", mu: { ischios: 0.5 } },
+    { k: "pont-1j", n: "Pont fessier sur une jambe", bw: true, gr: "jambes", mu: { ischios: 0.5 } },
     { k: "superman", n: "Superman (extension du dos au sol)", bw: true, gr: "tronc", mu: {} },
-    { k: "releve", n: "Relevés de jambes, suspendu", bw: true, gr: "tronc", mu: { abdos: 1 } }] },
+    { k: "releve", n: "Relevés de jambes, suspendu", bw: true, gr: "tronc", mu: { abdos: 1 } },
+    { k: "crunch", n: "Crunch", bw: true, gr: "tronc", mu: { abdos: 1 } }] },
   { g: "Au temps · durée au lieu des reps", ex: [
     { k: "gainage", n: "Gainage, planche", time: true, gr: "tronc", mu: { abdos: 1 } },
-    { k: "gainage-lat", n: "Gainage latéral", time: true, gr: "tronc", mu: { abdos: 1 } }] },
+    { k: "gainage-lat", n: "Gainage latéral", time: true, gr: "tronc", mu: { abdos: 1 } },
+    { k: "chaise", n: "Chaise contre un mur", time: true, gr: "jambes", mu: { quadri: 1 } }] },
   /* Retirés de la liste : gardés seulement pour afficher les séances déjà notées */
   { g: "", hidden: true, ex: [
     { k: "cou", n: "Cou, flexion et extension" },
@@ -134,6 +147,9 @@ var CATALOGUE = [
 /* Reconnaissance d'un exercice de programme d'après son nom, quand le programme ne donne pas son code
    (programmes installés avant la bibliothèque). Mots cherchés dans le nom sans accents, dans l'ordre. */
 var BANK_MATCH = [
+  ["pompes-table", ["pompe", "table"]], ["pompes-genoux", ["pompe", "genou"]], ["pompes-chaise", ["pompe", "chaise"]], ["pompes-pieds", ["pompe", "pieds"]],
+  ["squat-1j", ["squat", "une jambe"]], ["squat-lent", ["squat", "descente"]], ["squat-pdc", ["squat", "poids du corps"]], ["fente-bulg-pdc", ["fente bulgare", "poids du corps"]],
+  ["fentes-arr", ["fentes arriere"]], ["pont-1j", ["pont fessier", "jambe"]], ["pont", ["pont fessier"]], ["crunch", ["crunch"]], ["chaise", ["chaise contre"]],
   ["leg-curl", ["leg curl"]], ["pec-deck", ["pec deck"]], ["face-pull", ["face pull"]], ["hip-thrust", ["hip thrust"]],
   ["gainage-lat", ["gainage", "lateral"]], ["gainage", ["gainage"]],
   ["dc-halt", ["developpe couche", "haltere"]], ["dc-barre", ["developpe couche"]], ["di-halt", ["developpe incline", "haltere"]],
@@ -166,6 +182,24 @@ var RIR_MAX_SERIE = 4;
 var CAT = {}, CAT_ORDER = {};
 CATALOGUE.forEach(function (g) { g.ex.forEach(function (c) { CAT_ORDER[c.k] = keysOf(CAT).length; CAT[c.k] = c; }); });
 var LIBRE = "LIBRE";
+/* Programme sans matériel : variantes de plus en plus difficiles d'un même mouvement.
+   Pompes classées par part du poids de corps poussée (Ebben et al., J Strength Cond Res 2011) ;
+   progression par variantes (Kotarsky et al., J Strength Cond Res 2018). */
+var ECHELLES = [["pompes-table", "pompes-genoux", "pompes-chaise", "pompes", "pompes-pieds"], ["squat-pdc", "squat-lent", "squat-1j"], ["fentes-arr", "fente-bulg-pdc"], ["pont", "pont-1j"]];
+var VAR_NOTE = {
+  "pompes-table": "Mains sur le bord d'une table stable, corps droit et gainé de la tête aux pieds.",
+  "pompes-genoux": "Genoux au sol, corps droit des genoux aux épaules, poitrine près du sol.",
+  "pompes-chaise": "Mains sur une chaise calée contre un mur, ou sur une marche, corps droit.",
+  "pompes": "Corps droit et gainé, poitrine près du sol à chaque répétition.",
+  "pompes-pieds": "Pieds sur une chaise ou une marche, corps droit, poitrine près du sol.",
+  "squat-pdc": "Pieds largeur d'épaules, dos droit : descends aussi bas que possible sans douleur.",
+  "squat-lent": "Descente en 4 secondes, remontée normale. Dos droit.",
+  "squat-1j": "Sur une jambe, descends jusqu'à t'asseoir sur une chaise, puis remonte sans élan. Répétitions par jambe.",
+  "fentes-arr": "Grand pas en arrière, genou arrière près du sol, buste droit. Répétitions par jambe.",
+  "fente-bulg-pdc": "Pied arrière posé sur une chaise, genou arrière près du sol. Répétitions par jambe.",
+  "pont": "Sur le dos, pieds au sol : monte le bassin en serrant les fessiers, une seconde en haut.",
+  "pont-1j": "Sur le dos, une jambe tendue en l'air : monte le bassin, une seconde en haut. Répétitions par jambe." };
+function echelleOf(k) { for (var i = 0; i < ECHELLES.length; i++) if (ECHELLES[i].indexOf(k) >= 0) return ECHELLES[i]; return null; }
 var LIEUX = [{ v: "maison", l: "À la maison" }, { v: "salle", l: "Autre salle" }, { v: "dehors", l: "Dehors" }];
 var ICON_X = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13"/></svg>';
 
@@ -217,7 +251,7 @@ function freezeSession(s, prog) {
   s.plan = { name: def.name, short: def.short || def.name, ex: def.ex.map(function (e) {
     var p = presc(e, w); if (!p) return null;
     var x = { id: e.id, name: e.name, bw: !!e.bw, cat: exCat(e), mu: e.mu || null, gr: e.gr || "", step: e.step || 2.5, rest: p.rest || e.rest, ss: e.ss || "", note: e.note || "", alt: e.alt || [], p: p };
-    if (e.code) x.code = e.code; if (e.time) x.time = true;
+    if (e.code) x.code = e.code; if (e.time) x.time = true; if (e.ech) x.ech = true;
     return x;
   }).filter(Boolean) };
   return true;
@@ -682,7 +716,14 @@ function bodyMuscu(date, def, w, s, id) {
       (p.load ? '<div class="stat"><b>' + esc(p.load) + '</b><span>charge prévue</span></div>' : "") +
       '<div class="stat"><b>' + esc(light || ad.facile ? fmt(rirT) : p.rir) + '</b><span>RIR visé</span></div>' +
       '<div class="stat"><b>' + esc(p.rest || e.rest) + '</b><span>repos</span></div></div>';
-    if (!mod) {
+    var ech = e.ech && echelleOf(exCat(e));
+    if (!mod && ech) {
+      h += '<p class="advice">Au poids du corps, sans lest : vise le haut de la fourchette au RIR visé.</p>';
+      if (e.note) h += '<p class="small muted">' + esc(e.note) + "</p>";
+      if (!s.plan && !has) h += varBlock(e, p, id, date);
+      h += setRows(id, "sets." + e.id, rows, n, { head: "Lest (kg)", load: 0, reps: p.repsN, rir: rirT, repsHead: e.time ? "Sec." : "" });
+      h += '<div><button type="button" class="btn small quiet" data-act="modopen" data-id="' + esc(id) + '" data-ex="' + esc(e.id) + '">Sauté ou remplacé</button></div>';
+    } else if (!mod) {
       h += sg ? '<p class="advice">Charge conseillée : ' + esc(loadLabel(e, sg.load)) + ' <span class="muted">(' + esc(sg.src) + ")</span></p>" : '<p class="advice">Choisis la charge au RIR visé, puis note-la.</p>';
       if (e.note) h += '<p class="small muted">' + esc(e.note) + "</p>";
       h += setRows(id, "sets." + e.id, rows, n, { head: e.bw || e.time ? "Lest (kg)" : "Charge (kg)", load: sg ? sg.load : null, reps: p.repsN, rir: rirT, repsHead: e.time ? "Sec." : "" });
@@ -695,6 +736,59 @@ function bodyMuscu(date, def, w, s, id) {
   });
   h += '<div class="hr"></div>' + arretBlock(s, id) + bilan(s, id, true, { duree: true, charge: true });
   return h;
+}
+/* Variante d'un exercice sans matériel : niveau actuel, et conseil de passer à la suivante quand
+   toutes les séries de la dernière séance ont atteint le haut de la fourchette (Kotarsky et al. 2018). */
+function varReady(e, p, date) {
+  var k = exCat(e), L = echelleOf(k); if (!L || L.indexOf(k) >= L.length - 1) return null;
+  var top = nums(p.reps).pop(), lc = lastCat(k, date); if (!top || !lc) return null;
+  if (e.varDepuis && lc.date < e.varDepuis) return null;
+  if (e.garde && lc.date <= e.garde) return null;
+  if (lc.rows.length < 2 || !lc.rows.every(function (r) { return toNum(r.r) >= top; })) return null;
+  return { last: lc, next: L[L.indexOf(k) + 1], top: top };
+}
+function varBlock(e, p, id, date) {
+  var k = exCat(e), L = echelleOf(k), i = L.indexOf(k), r = varReady(e, p, date), h = "";
+  if (r) {
+    var nn = CAT[r.next].n, cn = CAT[k].n;
+    h += '<div class="note info stack"><p><b>Variante plus difficile conseillée.</b> Le ' + esc(fmtShort(r.last.date)) + ", tu as fait au moins " + r.top + " répétitions à chaque série de « " + esc(cn.toLowerCase()) + " ». Passe à « " + esc(nn.toLowerCase()) + " » : au début, tu feras moins de répétitions, c'est normal.</p>" +
+      '<div class="row"><button type="button" class="btn small primary" data-act="varset" data-id="' + esc(id) + '" data-ex="' + esc(e.id) + '" data-k="' + r.next + '">Passer à la variante suivante</button>' +
+      '<button type="button" class="linkbtn" data-act="vargarde" data-id="' + esc(id) + '" data-ex="' + esc(e.id) + '" data-d="' + r.last.date + '">Garder celle-ci</button></div></div>';
+  }
+  return h + '<div class="row"><span class="small muted grow">Variante ' + (i + 1) + " sur " + L.length + '</span><button type="button" class="linkbtn" data-act="varpick" data-id="' + esc(id) + '" data-ex="' + esc(e.id) + '">Changer de variante</button></div>';
+}
+function varTargets(k) {
+  var out = [];
+  if (!P) return out;
+  keysOf(P.sessions).forEach(function (t) { var d = P.sessions[t]; if (d && d.kind === "muscu" && d.ex) d.ex.forEach(function (e) { if (e.ech && exCat(e) === k) out.push(e); }); });
+  return out;
+}
+function setVariant(id, exId, k) {
+  var date = id.slice(0, id.lastIndexOf("_")), type = id.slice(id.lastIndexOf("_") + 1), def = P && P.sessions[type];
+  var e0 = def && def.ex ? def.ex.filter(function (e) { return e.id === exId; })[0] : null; if (!e0 || !CAT[k]) return;
+  var from = exCat(e0), c = CAT[k];
+  freezeAll(false);
+  varTargets(from).forEach(function (e) { e.cat = k; e.name = c.n; e.mu = c.mu; e.bw = !!c.bw; e.time = !!c.time || undefined; e.note = VAR_NOTE[k] || ""; e.varDepuis = date; delete e.garde; });
+  if (P.src && P.src.seances) P.src.seances.forEach(function (ss) { (ss.ex || []).forEach(function (x) { if (x.ech && x.k === from) { x.k = k; x.note = VAR_NOTE[k] || ""; } }); });
+  /* séance du jour déjà commencée sur d'autres exercices : la variante change quand même pour celui-ci */
+  var cur = D.seances[id];
+  if (cur && cur.plan) cur.plan.ex.forEach(function (x) { if (x.id === exId && !rowsOk((cur.sets || {})[exId] || {}).length) { x.cat = k; x.name = c.n; x.mu = c.mu; x.note = VAR_NOTE[k] || ""; } });
+  persist(); render(); toast("Nouvelle variante : " + c.n.toLowerCase());
+}
+function varPick(id, exId) {
+  var type = id.slice(id.lastIndexOf("_") + 1), def = P && P.sessions[type];
+  var e = def && def.ex ? def.ex.filter(function (x) { return x.id === exId; })[0] : null; if (!e) return;
+  var k = exCat(e), L = echelleOf(k), rr = nums((e.reps || []).filter(Boolean)[0]); if (!L) return;
+  var h = '<h2 id="dlg-t">Choisir la variante</h2><p class="small muted">Prends celle où tu fais ' + esc(rr.length > 1 ? "entre " + rr[0] + " et " + rr[rr.length - 1] : "assez de") + ' répétitions propres. Du plus facile au plus difficile :</p><div class="pick-list">';
+  L.forEach(function (v, i) { var c = CAT[v]; h += '<button type="button" class="pick" data-sh="pick" data-k="' + v + '"' + (v === k ? " disabled" : "") + "><span><b>" + (i + 1) + ". " + esc(c.n) + '</b><span class="small muted">' + esc(VAR_NOTE[v] || "") + '</span></span><span class="meta">' + (v === k ? "actuelle" : c.bwf ? "≈ " + Math.round(c.bwf * 100) + " % du poids" : "") + "</span></button>"; });
+  h += '</div><p class="tiny muted">Part du poids du corps poussée aux pompes : Ebben et al., J Strength Cond Res 2011.</p><div><button type="button" class="btn wide" data-sh="cancel">Fermer</button></div>';
+  openSheet(h, function (b, close) { close(); if (b.dataset.sh === "pick") setVariant(id, exId, b.dataset.k); }, true);
+}
+function varGarde(id, exId, d) {
+  var type = id.slice(id.lastIndexOf("_") + 1), def = P && P.sessions[type];
+  var e = def && def.ex ? def.ex.filter(function (x) { return x.id === exId; })[0] : null; if (!e) return;
+  varTargets(exCat(e)).forEach(function (x) { x.garde = d; });
+  persist(); render();
 }
 function modPanel(e, p, s, id, mod, planned, rirT, date) {
   var h = '<div class="panel">';
@@ -829,7 +923,7 @@ function libreEx(s, id, it, i, date) {
     : time ? "Première fois : note la durée tenue et la marge qu'il te restait." : "Première fois sur cet exercice : choisis une charge qui laisse 2 répétitions en réserve.") + "</p>";
   if (it.cible) h += '<p class="small">Prévu : ' + esc(it.cible) + (it.consigne ? ". " + esc(it.consigne) : "") + "</p>";
   h += libreRows(id, it.u, rows, n, c, last);
-  if (c && c.bw) h += '<p class="tiny muted">Poids de corps : mets 0 dans Lest. ' + (c.bwf ? "Les deux tiers de ton poids du jour sont comptés" : "Ton poids du jour est compté") + " dans la force estimée.</p>";
+  if (c && c.bw) h += '<p class="tiny muted">Poids de corps : mets 0 dans Lest. ' + (c.bwf ? (c.bwf >= 0.6 && c.bwf < 0.7 ? "Les deux tiers de ton poids du jour sont comptés" : "Environ " + Math.round(c.bwf * 100) + " % de ton poids du jour est compté") : "Ton poids du jour est compté") + " dans la force estimée.</p>";
   if (time) h += '<p class="tiny muted">Marge : combien de secondes tu aurais encore pu tenir, comme le RIR.</p>';
   return h + '<div><button type="button" class="btn small quiet" data-act="addset" data-id="' + esc(id) + '" data-base="sets.' + esc(it.u) + "." + n + '">Ajouter une série</button></div></div>';
 }
@@ -2072,7 +2166,7 @@ drawerEl().addEventListener("focusout", function () {
    L'objectif ne change pas les exercices : répétitions, RIR, repos et, en force, séries d'isolation. */
 var ISO_K = ["superman", "hip-thrust", "el-lat", "el-lat-poulie", "ecarte-poulie", "pec-deck", "curl-barre", "curl-halt", "curl-incl", "ext-poulie", "ext-tete", "ext-halt", "face-pull", "leg-curl", "mollets", "oiseau", "gainage", "gainage-lat", "releve"];
 var UNI_K = ["row-1b", "fente-bulg"];
-var MATS = [{ v: "salle", l: "Salle complète" }, { v: "halt", l: "Haltères et banc" }, { v: "street", l: "Street workout" }];
+var MATS = [{ v: "salle", l: "Salle complète" }, { v: "halt", l: "Haltères et banc" }, { v: "street", l: "Street workout" }, { v: "corps", l: "Sans matériel" }];
 var OBJS = [
   { v: "muscle", l: "Prise de muscle", d: "Le choix par défaut : des séries de 6 à 20 répétitions, proches de l'échec.", h: "6–10 rép. sur les principaux · repos 2 à 3 min" },
   { v: "force", l: "Force", d: "Charges lourdes sur les exercices principaux, un peu moins d'isolation.", h: "3–6 rép. sur les principaux · repos 3 min" },
@@ -2086,6 +2180,9 @@ var ROLES = { principal: "principal", secondaire: "secondaire", iso: "isolation"
 function X(k, s, r, note, zero) { var o = { k: k, s: s, r: r }; if (note) o.note = note; if (zero) o.zero = true; return o; }
 var VIDE = "À vide (0 kg) au début ; ajoute une charge quand le haut de la fourchette devient facile.";
 var CHAISE = "À vide, le haut du dos appuyé sur une chaise ou un banc.";
+function XE(k, s, r) { var o = X(k, s, r, VAR_NOTE[k]); o.ech = true; return o; }
+var CORPS = [["Renforcement A", [XE("squat-pdc", 3, "10–20"), XE("pompes-genoux", 3, "6–20"), XE("pont", 3, "10–20"), X("superman", 2, "10–15"), X("gainage", 2, "20–45 s")]],
+  ["Renforcement B", [XE("fentes-arr", 3, "8–15 par jambe"), XE("pompes-genoux", 3, "6–20"), X("chaise", 2, "30–60 s"), X("gainage-lat", 2, "15–30 s", "Durée pour chaque côté."), X("crunch", 2, "10–20")]]];
 var MODELES = {
   salle: {
     fb: [["Full body A", [X("squat", 3, "6–10"), X("dc-barre", 4, "6–10"), X("tirage-vert", 4, "8–12"), X("sdtr-barre", 3, "8–10"), X("el-lat", 3, "12–15"), X("curl-halt", 2, "10–15"), X("ext-poulie", 2, "10–15")]],
@@ -2116,7 +2213,8 @@ var MODELES = {
     hb: [["Haut 1", [X("tractions", 4, "5–12"), X("dips", 4, "6–15"), X("row-inv", 3, "8–15"), X("pompes-serrees", 3, "8–20")]],
       ["Bas 1", [X("squat", 3, "15–30", VIDE, true), X("superman", 3, "10–15"), X("fente-bulg", 3, "10–20 par jambe", VIDE, true), X("hip-thrust", 3, "15–25", CHAISE, true), X("mollets", 3, "15–25", VIDE, true), X("releve", 2, "8–15")]],
       ["Haut 2", [X("tractions-supi", 5, "5–12"), X("pompes", 4, "10–25"), X("row-inv", 3, "8–15"), X("dips", 2, "6–15"), X("pompes-serrees", 2, "8–20")]],
-      ["Bas 2", [X("fentes", 3, "10–20 par jambe", VIDE, true), X("superman", 3, "10–15"), X("squat", 2, "15–30", VIDE, true), X("hip-thrust", 3, "15–25", CHAISE, true), X("mollets", 3, "15–25", VIDE, true), X("gainage", 2, "30–60 s")]]] }
+      ["Bas 2", [X("fentes", 3, "10–20 par jambe", VIDE, true), X("superman", 3, "10–15"), X("squat", 2, "15–30", VIDE, true), X("hip-thrust", 3, "15–25", CHAISE, true), X("mollets", 3, "15–25", VIDE, true), X("gainage", 2, "30–60 s")]]] },
+  corps: { fb: CORPS }
 };
 function objOk(mat, obj) { return mat !== "street" || obj === "muscle" || obj === "endurance"; }
 function orgOk(mat, org) { return !(mat === "street" && org === "ppl"); }
@@ -2247,7 +2345,7 @@ function compile(d, pid) {
     if (s.kind === "muscu") {
       var rl = rolesOf(s), base = s.ex.map(function (x) { return toNum(x.s) || 1; });
       var ex = s.ex.map(function (x) { var c = CAT[x.k] || {}; return { id: x.id, code: x.code, name: exName(x), cat: x.k || "", mu: exMu(x), gr: c.gr || x.gr || "", bw: !!c.bw, time: !!c.time, step: c.per ? 2 : 2.5,
-        rest: x.rest, restW: [], sets: [], reps: [], repsN: [], rir: [], rirN: [], note: x.note || "", alt: [], base: c.bw || c.time || x.zero ? [] : null }; });
+        rest: x.rest, restW: [], sets: [], reps: [], repsN: [], rir: [], rirN: [], note: x.note || "", alt: [], base: c.bw || c.time || x.zero ? [] : null, ech: !!(x.ech && echelleOf(x.k)) || undefined }; });
       for (var w = 1; w <= N; w++) {
         var deload = dl && w === N, sets = base.slice();
         if (deload) sets = sets.map(function (n) { return Math.max(1, Math.ceil(n / 2)); });
@@ -2343,7 +2441,7 @@ function edStep1Muscu(d) {
     '<button type="button" data-act="ed" data-op="decharge" data-v="1" aria-pressed="' + !!d.decharge + '">Décharge</button><button type="button" data-act="ed" data-op="decharge" data-v="0" aria-pressed="' + !d.decharge + '">Normale</button></div></div>';
   h += '<p class="tiny muted">La semaine de décharge garde les mêmes exercices avec moitié moins de séries, loin de l\'échec, pour récupérer avant le bloc suivant.</p></section>';
   h += '<section class="sheet"><div class="titled"><h2>Point de départ</h2><p class="small muted">Pars d\'un modèle vérifié, puis adapte-le. Tout reste modifiable.</p></div>';
-  h += '<div class="scale"><div class="scale-q"><span>Ton matériel</span></div><div class="seg">' + MATS.map(function (m) { return '<button type="button" data-act="ed" data-op="mat" data-v="' + m.v + '" aria-pressed="' + (d.mat === m.v) + '">' + esc(m.l) + "</button>"; }).join("") + "</div></div>";
+  h += '<div class="scale"><div class="scale-q"><span>Ton matériel</span></div><div class="seg">' + MATS.filter(function (m) { return m.v !== "corps"; }).map(function (m) { return '<button type="button" data-act="ed" data-op="mat" data-v="' + m.v + '" aria-pressed="' + (d.mat === m.v) + '">' + esc(m.l) + "</button>"; }).join("") + "</div></div>";
   h += '<div class="scale"><div class="scale-q"><span>Ton objectif</span></div><div class="types">' + OBJS.map(function (o) {
     var dis = !objOk(d.mat, o.v);
     return '<button type="button" class="type" data-act="ed" data-op="obj" data-v="' + o.v + '" aria-pressed="' + (d.obj === o.v) + '"' + (dis ? ' aria-disabled="true"' : "") + "><b>" + esc(o.l) + "</b><span>" + esc(o.d) + '</span><span class="hint">' + esc(dis ? "Pas proposé en street workout : il faut pouvoir ajouter de la charge." : o.h) + "</span></button>";
@@ -2918,7 +3016,11 @@ var MIXTE_MU = {
   halt: [["Musculation A", [X("squat-halt", 3, "10–12"), X("dc-halt", 3, "10–12"), X("row-1b", 3, "10–12"), X("sdtr-halt", 3, "10–12"), X("gainage", 2, "30–45 s")]],
     ["Musculation B", [X("fentes", 3, "10 par jambe"), X("dm-halt", 3, "10–12"), X("row-1b", 3, "12–15"), X("hip-thrust", 3, "12–15"), X("gainage-lat", 2, "20–30 s")]]],
   street: [["Musculation A", [X("squat", 3, "15–20", VIDE, true), X("pompes", 3, "8–15"), X("row-inv", 3, "8–12"), X("superman", 3, "10–15"), X("gainage", 2, "30–45 s")]],
-    ["Musculation B", [X("fentes", 3, "10 par jambe", VIDE, true), X("dips", 3, "6–12"), X("tractions", 3, "3–8"), X("hip-thrust", 3, "12–15", CHAISE, true), X("gainage-lat", 2, "20–30 s")]]]
+    ["Musculation B", [X("fentes", 3, "10 par jambe", VIDE, true), X("dips", 3, "6–12"), X("tractions", 3, "3–8"), X("hip-thrust", 3, "12–15", CHAISE, true), X("gainage-lat", 2, "20–30 s")]]],
+  /* Sans matériel : séries proches de l'échec, charge légère efficace (Schoenfeld et al., J Strength Cond Res 2017) ;
+     pompes comparables au développé couché (Kikuchi & Nakazato 2017) ; tronc et hanches contre les blessures
+     de course des débutants (Leppänen et al., Br J Sports Med 2024) */
+  corps: CORPS
 };
 function genMixteRun(n) {
   var CM = function (run, walk, k) { return eFrac("Course et marche", fr(run, walk, k, 1, { echauf: 5, calme: 5, marche: true })); };
@@ -2964,8 +3066,8 @@ function regenRun(d) {
     d.seances = d.seances.filter(function (s) { return !s.mixte && !s.role; }); d.jours = [[], [], [], [], [], [], []];
     (MIXTE_MU[d.mat] || MIXTE_MU.halt).forEach(function (t, i) {
       var s = newSess(d, "muscu", t[0]); s.mixte = true;
-      t[1].forEach(function (mm) { var x = newEx(d, s, mm.k); x.b = { s: mm.s, r: mm.r }; if (mm.note) x.note = mm.note; if (mm.zero) x.zero = true; s.ex.push(x); });
-      s.ex.forEach(function (x) { x.s = x.b.s; x.r = x.b.r; x.rir = "2"; x.rest = exIso(x) ? "1 min 30" : "2 min"; });
+      t[1].forEach(function (mm) { var x = newEx(d, s, mm.k); x.b = { s: mm.s, r: mm.r }; if (mm.note) x.note = mm.note; if (mm.zero) x.zero = true; if (mm.ech) x.ech = true; s.ex.push(x); });
+      s.ex.forEach(function (x) { x.s = x.b.s; x.r = x.b.r; x.rir = "2"; x.rest = d.mat === "corps" ? (CAT[x.k] && CAT[x.k].time ? "1 min" : "1 min 30") : exIso(x) ? "1 min 30" : "2 min"; });
       d.seances.push(s); d.jours[i === 0 ? 0 : 4].push(s.u);
     });
     [["a", "Course A", m.a, 2], ["b", "Course B", m.b, 6]].forEach(function (t) {
@@ -3069,6 +3171,7 @@ function edMixte1(d) {
     '<label class="field"><span>Nombre de semaines</span><select data-act="edsel" data-op="msem">' + [4, 5, 6, 7, 8, 9, 10, 11, 12].map(function (n) { return '<option value="' + n + '"' + (Number(d.semaines) === n ? " selected" : "") + ">" + n + "</option>"; }).join("") + "</select></label></div>";
   h += '<div class="scale"><div class="scale-q"><span>Ton matériel de musculation</span></div><div class="seg">' + MATS.map(function (m) { return '<button type="button" data-act="ed" data-op="mmat" data-v="' + m.v + '" aria-pressed="' + (d.mat === m.v) + '">' + esc(m.l) + "</button>"; }).join("") + "</div></div>";
   h += '<div class="note info">Chaque semaine : 2 séances de course (une d\'endurance, une plus variée) et 2 séances de musculation de 45 min environ, sur 4 jours différents. Environ 150 minutes d\'activité et 2 séances de renforcement, comme le recommande l\'OMS.' + (Number(d.semaines) >= 9 ? " Objectif : 30 minutes de course sans t'arrêter en fin de programme." : " Avec 9 semaines ou plus, le programme va jusqu'à 30 minutes de course continue.") + "</div>";
+  if (d.mat === "corps") h += '<div class="note info">Sans matériel : squats, fentes, pompes, pont fessier et gainage. Chaque mouvement a des variantes de plus en plus difficiles : le carnet te conseille de passer à la suivante quand tu atteins le haut de la fourchette à toutes les séries. Il te faut seulement une chaise et une table stables. Sans barre ni élastique, le dos n\'est travaillé qu\'en extension au sol (superman), pas en tirage.</div>';
   h += '<p class="tiny muted">Intensité au ressenti et à la FC, sans test de VMA. Musculation : 2 séries les 2 premières semaines, puis 3.</p></section>';
   h += '<div class="row spread">' + edBtn("quit", "Retour", "quiet") + edBtn("next", "Continuer", "primary") + "</div>";
   return h;
@@ -4179,6 +4282,9 @@ function onAct(ev) {
       var rex = progEx(doc, b.dataset.ex), pdef = (P && P.sessions[doc.type]) || {}, pe = (pdef.ex || []).filter(function (x) { return x.id === b.dataset.ex; })[0] || (doc.plan && doc.plan.ex.filter(function (x) { return x.id === b.dataset.ex; })[0]);
       rempMenu(b.dataset.id, b.dataset.ex, { id: b.dataset.ex, name: rex ? rex.name : b.dataset.ex, cat: pe ? exCat(pe) : "", mu: pe ? pe.mu : null, alt: pe ? pe.alt : [] }); break;
     case "modopen": doc = docFor("seances", b.dataset.id); setPath(doc, "mods." + b.dataset.ex, { statut: "remplace" }); persist(); render(); break;
+    case "varpick": varPick(b.dataset.id, b.dataset.ex); break;
+    case "varset": setVariant(b.dataset.id, b.dataset.ex, b.dataset.k); break;
+    case "vargarde": varGarde(b.dataset.id, b.dataset.ex, b.dataset.d); break;
     case "modclose": doc = docFor("seances", b.dataset.id); setPath(doc, "mods." + b.dataset.ex, null); setPath(doc, "remp." + b.dataset.ex, null); persist(); render(); break;
     case "arretopen": doc = docFor("seances", b.dataset.id); doc.arret = { ouvert: true }; persist(); render(); break;
     case "arretclose": doc = docFor("seances", b.dataset.id); delete doc.arret; persist(); render(); break;
