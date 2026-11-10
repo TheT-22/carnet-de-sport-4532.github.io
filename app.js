@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.13.0";
+var APP_VERSION = "1.14.0";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -333,7 +333,7 @@ function plannedBase(date) {
   if (date === P.debut && P.sessions.MENSU && !P.cree) out.unshift("MENSU");
   return out;
 }
-var NOT_DATA = ["date", "type", "semaine", "programme", "checkin", "ajoutee", "maj", "libre", "lieu", "remplace", "liste", "nU", "cardio", "sport", "ctype", "fmt", "velMes", "nSer", "nRep", "legacy", "fplan", "ftexte", "fsport", "fctype", "fspec", "adapte", "alerteA", "pour", "avanceDe", "garderSeries", "modele"];
+var NOT_DATA = ["date", "type", "semaine", "programme", "checkin", "ajoutee", "maj", "libre", "lieu", "remplace", "liste", "nU", "cardio", "sport", "ctype", "fmt", "velMes", "nSer", "nRep", "legacy", "fplan", "ftexte", "fsport", "fctype", "fspec", "adapte", "alerteA", "pour", "avanceDe", "garderSeries", "modele", "chg", "stype"];
 function hasData(s) {
   if (!s) return false;
   return keysOf(s).some(function (k) { if (k === "smod") return !!(s.smod && s.smod.statut); return NOT_DATA.indexOf(k) < 0 && s[k] !== undefined && s[k] !== null && JSON.stringify(s[k]) !== "{}"; });
@@ -405,6 +405,46 @@ function suggestion(e, p, date) {
   if (last) return { load: targetFrom(last, p, e.step || 2.5, e.bw ? bodyweight(last.date) : 0, e.bw ? bodyweight(date) : 0), src: "d'après ta séance du " + fmtShort(last.date) };
   if (p.base !== null && p.base !== undefined) return { load: roundTo(p.base, e.step || 2.5), src: "charge prévue" };
   return null;
+}
+/* Conseil de monter ou d'alléger une charge, d'après les dernières séances du même exercice.
+   Monter : +2 à 10 % quand la cible est dépassée (ACSM, Med Sci Sports Exerc 2009;41(3):687-708) ; ici, toutes les
+   séries à la cible avec au moins 1 répétition de marge en plus que prévu. Réservé aux séries de 10 répétitions au
+   plus, où la marge s'estime mieux (Larsen et al., PeerJ 2021). Alléger après 2 séances sous la cible : règle de
+   pratique, sans étude qui fixe ce seuil. Toujours un conseil : l'athlète choisit. */
+function lastPerfs(exId, before, n) {
+  var out = [], list = valuesOf(D.seances).filter(function (s) { return s.date < before && s.sets && s.sets[exId]; }).sort(function (a, b) { return a.date < b.date ? 1 : -1; });
+  for (var i = 0; i < list.length && out.length < n; i++) { var rows = rowsOk(list[i].sets[exId]); if (rows.length) out.push({ date: list[i].date, rows: rows }); }
+  return out;
+}
+function topLoad(rows) { return rows.reduce(function (m, r) { return Math.max(m, toNum(r.c) || 0); }, 0); }
+function chargeAdvice(e, p, date) {
+  if (e.time || e.ech || !p.repsN || p.repsN > 10 || p.rirN === null || p.rirN === undefined) return null;
+  var L = lastPerfs(e.id, date, 2), a = L[0]; if (!a || a.rows.length < 2) return null;
+  var step = e.step || 2.5, cur = topLoad(a.rows), bw = e.bw ? bodyweight(date) || 0 : 0, tot = cur + bw;
+  if (!e.bw && cur <= 0) return null;
+  var reps = a.rows.map(function (r) { return toNum(r.r); });
+  var allAt = a.rows.every(function (r) { return toNum(r.c) === cur && toNum(r.r) >= p.repsN && toNum(r.rir) !== null && toNum(r.rir) >= p.rirN + 1; });
+  if (allAt) {
+    var up = cur + step; if (tot > 0 && (up - cur) / tot > 0.1) return null;
+    return { kind: "up", load: up, cur: cur, last: a, reps: reps, rir: Math.min.apply(null, a.rows.map(function (r) { return toNum(r.rir); })) };
+  }
+  var b = L[1]; if (!b) return null;
+  function under(x) { return topLoad(x.rows) === cur && x.rows.some(function (r) { return toNum(r.r) < p.repsN; }); }
+  if (under(a) && under(b)) {
+    var down = Math.min(cur - step, roundTo(tot * 0.95 - bw, step)); if (down < 0) down = 0; if (down >= cur) return null;
+    return { kind: "down", load: down, cur: cur, last: a, prev: b, reps: reps, reps2: b.rows.map(function (r) { return toNum(r.r); }) };
+  }
+  return null;
+}
+function chargeNote(ca, e, p, s, id) {
+  var ch = s.chg && s.chg[e.id] !== undefined && s.chg[e.id] !== null ? toNum(s.chg[e.id]) : null, at = ' data-id="' + esc(id) + '" data-ex="' + esc(e.id) + '"';
+  if (ch !== null) return '<p class="advice">Charge choisie : ' + esc(loadLabel(e, ch)) + ' <button type="button" class="linkbtn" data-act="chgset"' + at + ' data-v="">Revoir le conseil</button></p>';
+  var h, up = ca.kind === "up";
+  if (up) h = "<p><b>Tu peux monter à " + esc(loadLabel(e, ca.load)) + ".</b> Le " + esc(fmtShort(ca.last.date)) + " : " + esc(loadLabel(e, ca.cur)) + ", " + ca.reps.join(", ") + " répétitions, avec plus de marge que prévu (RIR " + fmt(ca.rir) + " pour " + fmt(p.rirN) + " visé).</p>";
+  else h = "<p><b>Charge à alléger : " + esc(loadLabel(e, ca.load)) + " conseillés.</b> Deux séances de suite sous la cible à " + esc(loadLabel(e, ca.cur)) + " (" + ca.reps2.join(", ") + " puis " + ca.reps.join(", ") + ").</p>";
+  h += '<div class="row"><button type="button" class="btn small primary" data-act="chgset"' + at + ' data-v="' + ca.load + '">Passer à ' + esc(loadLabel(e, ca.load)) + '</button><button type="button" class="linkbtn" data-act="chgset"' + at + ' data-v="' + ca.cur + '">Rester à ' + esc(loadLabel(e, ca.cur)) + "</button></div>";
+  h += '<p class="tiny muted">' + (up ? "Règle : hausse de 2 à 10 % quand la cible est dépassée (ACSM 2009)." : "Règle de pratique : alléger d'environ 5 % après deux séances sous la cible.") + "</p>";
+  return '<div class="note ' + (up ? "info" : "warn") + ' stack">' + h + "</div>";
 }
 function loadLabel(e, x) { return e.bw ? (x > 0 ? "+" + fmt(x) + " kg de lest" : "poids de corps") : fmt(x) + " kg"; }
 
@@ -724,7 +764,9 @@ function bodyMuscu(date, def, w, s, id) {
       h += setRows(id, "sets." + e.id, rows, n, { head: "Lest (kg)", load: 0, reps: p.repsN, rir: rirT, repsHead: e.time ? "Sec." : "" });
       h += '<div><button type="button" class="btn small quiet" data-act="modopen" data-id="' + esc(id) + '" data-ex="' + esc(e.id) + '">Sauté ou remplacé</button></div>';
     } else if (!mod) {
-      h += sg ? '<p class="advice">Charge conseillée : ' + esc(loadLabel(e, sg.load)) + ' <span class="muted">(' + esc(sg.src) + ")</span></p>" : '<p class="advice">Choisis la charge au RIR visé, puis note-la.</p>';
+      var ca = !s.plan && !has ? chargeAdvice(e, p, date) : null;
+      if (ca) { h += chargeNote(ca, e, p, s, id); sg = { load: s.chg && toNum(s.chg[e.id]) !== null ? toNum(s.chg[e.id]) : ca.load, src: "" }; }
+      else h += sg ? '<p class="advice">Charge conseillée : ' + esc(loadLabel(e, sg.load)) + ' <span class="muted">(' + esc(sg.src) + ")</span></p>" : '<p class="advice">Choisis la charge au RIR visé, puis note-la.</p>';
       if (e.note) h += '<p class="small muted">' + esc(e.note) + "</p>";
       h += setRows(id, "sets." + e.id, rows, n, { head: e.bw || e.time ? "Lest (kg)" : "Charge (kg)", load: sg ? sg.load : null, reps: p.repsN, rir: rirT, repsHead: e.time ? "Sec." : "" });
       h += '<div><button type="button" class="btn small quiet" data-act="modopen" data-id="' + esc(id) + '" data-ex="' + esc(e.id) + '">Sauté ou remplacé</button></div>';
@@ -1100,8 +1142,26 @@ function courseSession(date, def, w, s, id) {
   h += checkin(s, id) + '<div class="hr"></div>';
   return h + cardioBody(date, vs, id, ci) + '<div data-live="' + esc(id) + '" data-kind="alerta">' + alertAHtml(vs, id, ci) + "</div>";
 }
+/* Type de séance d'un sport de combat et lendemain. Combats d'entraînement : peu de dégâts musculaires, pas de baisse
+   de performance (sparring de MMA, J Strength Cond Res 2016;30(8):2156-2163) ; le lendemain n'est protégé que si la
+   séance a été notée très dure. Compétition : marqueurs musculaires élevés à 24 h, revenus à la normale à 48 h chez
+   des judokas ; fatigue cumulée sur plusieurs combats (Detanico et al., J Strength Cond Res 2015;29(4):1010-1016).
+   Études sur le judo et le MMA, petits effectifs : à prendre comme un repère. */
+var STYPES = ["Technique", "Combats", "Compétition"];
+function sportHard(s) { return s.intensite === "Très dure" || (s.bilan && toNum(s.bilan.rpe) >= 8); }
+function stypeEffect(s) { if (!s || !s.stype) return null; if (s.stype === "Technique") return "none"; if (s.stype === "Compétition") return "hard"; return sportHard(s) ? "hard" : "none"; }
+function stypeNote(s) {
+  var e = stypeEffect(s); if (!e) return null;
+  if (s.stype === "Technique") return { cls: "info", t: "Séance technique : le planning des jours suivants ne change pas." };
+  if (s.stype === "Compétition") return { cls: "warn", t: "<b>Compétition : demain, ni bas du corps ni fractionné.</b> Le planning en tient compte ; reprise possible le surlendemain." };
+  return e === "hard" ? { cls: "warn", t: "<b>Combats très durs : demain, ni bas du corps ni fractionné.</b> Le planning en tient compte." } : { cls: "info", t: "Combats sans difficulté particulière : le planning ne change pas. Il s'adapte si tu notes la séance très dure (intensité « Très dure » ou difficulté de 8 et plus)." };
+}
 function bodySport(def, s, id) {
   var h = (def.info ? '<p class="small muted">' + esc(def.info) + "</p>" : "") + checkin(s, id) + '<div class="hr"></div><p class="small muted">Après la séance, note son intensité : elle sert à doser la séance du lendemain.</p>';
+  if (isCombat(def.name)) {
+    h += '<div class="scale"><div class="scale-q"><span>Type de séance</span></div>' + seg("seances", id, "stype", STYPES, s.stype) + '<p class="tiny muted">Technique : gestes et répétitions. Combats : randoris à pleine intensité. Compétition : jour de tournoi.</p></div>';
+    var sn = stypeNote(s); if (sn) h += '<div class="note ' + sn.cls + '">' + sn.t + "</div>";
+  }
   h += '<div class="scale"><div class="scale-q"><span>Intensité de la séance</span></div>' + seg("seances", id, "intensite", ["Légère", "Normale", "Très dure"], s.intensite) + "</div>";
   h += '<label class="field"><span>' + (def.custom ? "Minutes de travail intense" : "Minutes de combat ou de travail intense") + '</span>' + inp("seances", id, "combats", s.combats, 'inputmode="numeric" placeholder="ex. 25"') + "</label>";
   h += '<label class="field"><span>Durée totale de la séance (min)</span>' + inp("seances", id, "duree", s.duree, 'inputmode="numeric" placeholder="ex. ' + (toNum(def.duree) || 90) + '"') + "</label>";
@@ -3542,7 +3602,7 @@ function profOf(t, w) { return profDef(t, sessionDef(t), w); }
 /* Ce qui a vraiment été fait un jour donné (toutes séances confondues) */
 function dayActual(date) {
   var a = null;
-  function add(p) { if (!p) return; a = a || { haut: false, bas: false, frac: false, long: false, sport: false, dur: false, names: [] }; ["haut", "bas", "frac", "long", "sport", "dur"].forEach(function (k) { a[k] = a[k] || !!p[k]; }); if (p.name) a.names.push(p.name); }
+  function add(p) { if (!p) return; a = a || { haut: false, bas: false, frac: false, long: false, sport: false, dur: false, cdur: false, names: [] }; ["haut", "bas", "frac", "long", "sport", "dur", "cdur"].forEach(function (k) { a[k] = a[k] || !!p[k]; }); if (p.name) a.names.push(p.name); }
   valuesOf(D.seances).forEach(function (s) {
     if (s.date !== date) return;
     if (s.smod && s.smod.statut) { var pr = s.smod.par || {}; if (s.smod.statut === "remplace" && pr.k === "sport") add({ sport: true, dur: pr.intensite !== "Légère", name: pr.nom || "Autre sport" }); return; }
@@ -3550,7 +3610,9 @@ function dayActual(date) {
     if (s.type === LIBRE) { var z = zonesOf((s.liste || []).map(function (it) { var c = CAT[it.k]; return { mu: c ? c.mu : null, n: 1 }; })); add({ haut: z.haut, bas: z.bas, name: "Séance libre" }); return; }
     if (isCardioType(s.type)) { var ci = cardioInfo(s) || {}; add({ frac: ci.ctype === "fractionne", dur: ci.ctype === "fractionne", name: cardioTitle(s) }); return; }
     var w = s.semaine || (P && inBlock(date) ? weekOf(date) : 1), d = s.plan ? { kind: "muscu", ex: s.plan.ex.map(function (x) { return { mu: x.mu, cat: x.cat, sets: [] }; }) } : sessionDef(s.type);
-    var p = profDef(s.type, d || defOf(s), w); p.name = shortName(s.type); add(p);
+    var p = profDef(s.type, d || defOf(s), w); p.name = shortName(s.type);
+    var se = p.sport ? stypeEffect(s) : null; if (se === "none") { p.sport = false; p.dur = false; } else if (se === "hard") p.cdur = true;
+    add(p);
   });
   return a;
 }
@@ -3595,6 +3657,7 @@ function pairRule(a, b) {
   if (!a || !b) return null;
   if (a.haut && b.haut) return { c: Infinity, why: "deux séances du haut du corps à moins de 48 h" };
   if (a.bas && b.bas) return { c: Infinity, why: "deux séances du bas du corps à moins de 48 h" };
+  if (a.cdur && (b.bas || b.frac)) return { c: 6, why: (b.bas ? "bas du corps" : "fractionné") + " le lendemain de combats très durs ou d'une compétition" };
   if (a.frac && b.frac) return { c: 5, why: "deux séances de fractionné à moins de 48 h" };
   if ((a.bas && b.frac) || (a.frac && b.bas)) return { c: 4, why: "bas du corps et fractionné à moins de 24 h d'écart" };
   if (a.bas && b.sport) return { c: 4, why: "bas du corps la veille d'un sport intense" };
@@ -3607,7 +3670,7 @@ function pairRule(a, b) {
 }
 function pairCost(a, b) { var r = pairRule(a, b); return r ? r.c : 0; }
 function sameDay(a, b) { if (!a || !b) return 0; if ((a.haut && b.haut) || (a.bas && b.bas) || (a.bas && b.frac) || (a.frac && b.bas) || (a.frac && b.sport) || (a.sport && b.frac) || (a.bas && b.sport) || (a.sport && b.bas)) return Infinity; return 0; }
-function mergeP(a, b) { if (!a) return b; if (!b) return a; var o = {}; ["haut", "bas", "frac", "long", "sport", "dur"].forEach(function (k) { o[k] = !!(a[k] || b[k]); }); return o; }
+function mergeP(a, b) { if (!a) return b; if (!b) return a; var o = {}; ["haut", "bas", "frac", "long", "sport", "dur", "cdur"].forEach(function (k) { o[k] = !!(a[k] || b[k]); }); return o; }
 /* Calcul de la semaine : ce qui est fait, ce qui reste, et la meilleure façon de placer le reste */
 function flexUnknown(date) {
   if (date !== todayStr()) return false; var ft = flexTypes()[0]; if (!ft) return false;
@@ -4269,6 +4332,7 @@ function onAct(ev) {
       doc = docFor(b.dataset.col, b.dataset.id); var cur = getPath(doc, b.dataset.path), v = b.dataset.v;
       if (/^\d+$/.test(v)) v = Number(v);
       setPath(doc, b.dataset.path, String(cur) === String(v) ? null : v); persist(); render(); break;
+    case "chgset": doc = docFor("seances", b.dataset.id); doc.chg = doc.chg || {}; if (b.dataset.v === "") delete doc.chg[b.dataset.ex]; else doc.chg[b.dataset.ex] = Number(b.dataset.v); if (!keysOf(doc.chg).length) delete doc.chg; persist(); render(); break;
     case "toggle": doc = docFor(b.dataset.col, b.dataset.id); setPath(doc, b.dataset.path, getPath(doc, b.dataset.path) ? null : true); persist(); render(); break;
     case "fill":
       doc = docFor("seances", b.dataset.id);
