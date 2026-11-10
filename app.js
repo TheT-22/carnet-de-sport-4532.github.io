@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.14.0";
+var APP_VERSION = "1.15.0";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -512,6 +512,7 @@ function render() {
   else if (S.view === "jour") h = viewJour();
   else if (S.view === "semaine") h = viewSemaine();
   else if (S.view === "progres") h = viewProgres();
+  else if (S.view === "bilans") h = viewBilans();
   else h = viewJour();
   if (S.updateReady) h = '<div class="note info row"><span class="grow">Une nouvelle version de l\'application est prête.</span><button type="button" class="btn small primary" data-act="update">Mettre à jour</button></div>' + h;
   app.innerHTML = h;
@@ -4275,6 +4276,301 @@ function tryInstallFromText(text, link) {
   decodeProgram(code).then(function (p) { confirmInstall(p, link || ("" + location.origin + location.pathname + "#p=" + code)); }, function (err) { toast(err.message); });
 }
 
+/* ================= Bilans : une semaine, plusieurs semaines ou un bloc ; vue d'ensemble et détail ; PDF ================= */
+function bilProgs() {
+  return valuesOf(D.programmes).filter(function (p) { return p && p.debut && p.semaines && p.sessions && p.id !== D.complement && (p === P || valuesOf(D.seances).some(function (s) { return s.programme === p.id && realData(s); })); })
+    .sort(function (a, b) { return a.debut < b.debut ? 1 : -1; });
+}
+function bilProgAt(mon) { var L = bilProgs(); for (var i = 0; i < L.length; i++) if (mon >= mondayOfDate(L[i].debut) && mon <= lastDayProg(L[i])) return L[i]; return null; }
+function bilWeeksOf(p) { var out = [], m = mondayOfDate(p.debut); for (var w = 0; w < p.semaines; w++) out.push(addDays(m, w * 7)); return out; }
+function bilPlanned(p, w) {
+  if (!p || !p.versions) return null; var v = p.versions[keysOf(p.versions)[0]]; if (!v || !v.jours) return null; var n = 0;
+  v.jours.forEach(function (j) { (j || []).forEach(function (t) { var d = p.sessions[t]; if (d && d.kind !== "repos" && t !== "REPOS" && !planSkip(p, t, w)) n++; }); });
+  return n;
+}
+function bilName(s) { if (s.type === LIBRE) return "Séance libre"; if (isCardioType(s.type)) return cardioTitle(s); if (s.plan && s.plan.short) return s.plan.short; var d = defOf(s); return d ? d.short || d.name : s.type; }
+function bilExList(s) { if (s.plan) return s.plan.ex.map(function (x) { return { e: x, p: x.p }; }); var d = defOf(s); return d && d.ex ? d.ex.map(function (e) { return { e: e, p: presc(e, s.semaine || 1) }; }) : []; }
+function bilLine(s) {
+  var o = { date: s.date, nom: bilName(s), txt: "", droite: "", ko: false, rpe: toNum((s.bilan || {}).rpe), forme: null };
+  var r = readiness(s.checkin); if (r) o.forme = r.avg;
+  if (s.smod && s.smod.statut) { o.ko = s.smod.statut === "saute"; o.txt = o.ko ? (s.smod.motif ? motifLabel(MOTIFS_SMOD, s.smod.motif) : "") : smodText(s); o.droite = o.ko ? "sautée" : ""; return o; }
+  var d = defOf(s) || {};
+  if (s.sets && (d.kind === "muscu" || s.plan)) {
+    var L = bilExList(s);
+    for (var i = 0; i < L.length; i++) {
+      var rows = rowsOk(s.sets[L[i].e.id]); if (!rows.length) continue;
+      var e = L[i].e, p = L[i].p, top = topLoad(rows), rirs = rows.map(function (x) { return toNum(x.rir); }).filter(function (x) { return x !== null; });
+      o.txt = e.name + " : " + loadLabel(e, top) + " × " + rows.map(function (x) { return toNum(x.r); }).join(", ");
+      if (rirs.length) o.droite = "RIR " + fmt(Math.min.apply(null, rirs));
+      if (p && p.repsN && !e.time && rows.some(function (x) { return toNum(x.r) < p.repsN; })) { o.ko = true; o.droite = "sous la cible"; }
+      break;
+    }
+  } else if (d.kind === "sport") o.txt = [s.stype ? s.stype.toLowerCase() : "", toNum(s.duree) ? toNum(s.duree) + " min" : "", s.intensite ? s.intensite.toLowerCase() : ""].filter(Boolean).join(", ");
+  else if (toNum(s.duree)) o.txt = toNum(s.duree) + " min";
+  if (!o.droite && o.rpe) o.droite = "difficulté " + fmt(o.rpe);
+  var n = (s.bilan || {}).note; if (n) o.note = n;
+  return o;
+}
+function bilWeek(mon) {
+  var sun = addDays(mon, 6), p = bilProgAt(mon), w = p ? weekOfProg(p, mon) : null;
+  var ss = valuesOf(D.seances).filter(function (s) { return s.date >= mon && s.date <= sun && s.type !== "REPOS" && (hasData(s) || isSkipped(s)); }).sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+  var done = ss.filter(function (s) { return realData(s); }), lines = ss.map(bilLine), formes = lines.map(function (l) { return l.forme; }).filter(function (x) { return x !== null; });
+  var charge = 0; ss.forEach(function (s) { charge += (s.smod && s.smod.statut ? smodLoad(s) : sessLoad(s)) || 0; });
+  var planned = p ? bilPlanned(p, w) : null; if (planned !== null && planned < done.length) planned = done.length;
+  var sw = sleepWeek(mon), notes = lines.filter(function (l) { return l.note; }).map(function (l) { return { date: l.date, t: l.note }; });
+  var wd = p && p === P ? D.semaines[weekDocId(w)] : null; if (wd && wd.douleurs) notes.push({ date: sun, t: "Douleurs de la semaine : " + wd.douleurs });
+  return { mon: mon, sun: sun, prog: p, w: w, ss: ss, done: done.length, planned: planned, lines: lines, skipped: ss.filter(isSkipped), forme: formes.length ? formes.reduce(function (a, b) { return a + b; }, 0) / formes.length : null,
+    charge: charge || null, poids: weekAvg(mon), sommeil: sw.avg, notes: notes, deload: !!(p && p.deload && p.deload.indexOf(w) >= 0) };
+}
+function bilKeys(p) {
+  var out = []; if (!p) return out;
+  keysOf(p.sessions).forEach(function (t) { var d = p.sessions[t]; if (d && d.kind === "muscu" && d.ex && d.ex[0] && !d.ex[0].time) out.push({ t: t, id: d.ex[0].id, e: d.ex[0] }); });
+  return out.slice(0, 5);
+}
+function bilBest(wk, k) {
+  var best = null;
+  wk.ss.forEach(function (s) {
+    if (s.type !== k.t || !s.sets || !realData(s)) return;
+    rowsOk(s.sets[k.id]).forEach(function (r) { var c = toNum(r.c), sc = e1rm(c + (k.e.bw ? bodyweight(s.date) : 0), toNum(r.r), 0); if (!best || sc > best.sc) best = { c: c, r: toNum(r.r), sc: sc }; });
+  });
+  return best;
+}
+function bilEvo(v) { return Math.abs(v) < 0.5 ? "stable" : (v > 0 ? "+" : "-") + fmt(Math.abs(v), Math.abs(v) < 10 ? 1 : 0) + " %"; }
+function bilSet(k, b) { return b ? (k.e.bw ? (b.c > 0 ? "+" + fmt(b.c) : "poids du corps") : fmt(b.c) + " kg") + " × " + b.r : "–"; }
+var JOURS_LONGS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"];
+function bilModel(weeks, prog) {
+  var today = todayStr(), W = weeks.slice().sort().filter(function (m) { return m <= today; }).map(bilWeek); if (!W.length) return null;
+  var m = { W: W, prog: prog, from: W[0].mon, to: W[W.length - 1].sun, done: 0, planned: 0, hasPlan: true, notes: [], skipped: [] };
+  var formes = [], poids = [], som = [];
+  W.forEach(function (w) { m.done += w.done; if (w.planned === null) m.hasPlan = false; else m.planned += w.planned; if (w.forme !== null) formes.push(w.forme); if (w.poids) poids.push(w.poids); if (w.sommeil !== null) som.push(w.sommeil); m.notes = m.notes.concat(w.notes); m.skipped = m.skipped.concat(w.skipped); });
+  var avg = function (a) { return a.length ? a.reduce(function (x, y) { return x + y; }, 0) / a.length : null; };
+  m.forme = avg(formes); m.sommeil = avg(som); m.poids = poids.length ? poids[poids.length - 1] : null; m.dPoids = poids.length > 1 ? poids[poids.length - 1] - poids[0] : null;
+  var p0 = prog || W[W.length - 1].prog;
+  m.ex = bilKeys(p0).map(function (k) {
+    var vals = W.map(function (w) { return bilBest(w, k); }), ok = vals.filter(Boolean), a = ok[0], z = ok[ok.length - 1];
+    return { k: k, nom: k.e.name, vals: vals, a: a, z: z, n: ok.length, evo: ok.length > 1 ? (z.sc / a.sc - 1) * 100 : null };
+  }).filter(function (x) { return x.n; });
+  /* à retenir */
+  var R = [];
+  var fin = W.filter(function (w) { return w.sun < today && w.planned; }), dF = 0, pF = 0; fin.forEach(function (w) { dF += w.done; pF += w.planned; });
+  if (m.hasPlan && m.planned) R.push({ ok: !pF || dF / pF >= 0.85, t: m.done + " séance" + (m.done > 1 ? "s" : "") + " faite" + (m.done > 1 ? "s" : "") + " sur " + m.planned + " prévues" + (fin.length < W.length ? ", semaine en cours comprise." : ".") });
+  else R.push({ ok: true, t: m.done + " séance" + (m.done > 1 ? "s" : "") + " notée" + (m.done > 1 ? "s" : "") + "." });
+  var by = {};
+  m.skipped.forEach(function (s) { var n = bilName(s); (by[n] = by[n] || []).push(s); });
+  keysOf(by).forEach(function (n) {
+    var L = by[n], dj = {}, mo = {}; L.forEach(function (s) { var j = dow(s.date); dj[j] = (dj[j] || 0) + 1; var mt = s.smod.motif; if (mt) mo[mt] = (mo[mt] || 0) + 1; });
+    var jm = keysOf(dj).sort(function (a, b) { return dj[b] - dj[a]; })[0], mm = keysOf(mo).sort(function (a, b) { return mo[b] - mo[a]; })[0];
+    R.push({ ok: false, b: n, t: L.length + " séance" + (L.length > 1 ? "s" : "") + " sautée" + (L.length > 1 ? "s" : "") + (mm ? " (" + motifLabel(MOTIFS_SMOD, mm) + ")" : "") + (L.length > 1 && dj[jm] > 1 ? ", surtout le " + JOURS_LONGS[jm] : "") + "." });
+  });
+  var up = m.ex.filter(function (x) { return x.evo !== null && x.evo >= 1; }), flat = m.ex.filter(function (x) { return x.evo !== null && x.evo < 1 && x.n >= 3; });
+  if (up.length) R.push({ ok: true, b: "En progression", t: up.map(function (x) { return x.nom + " (" + bilEvo(x.evo) + ")"; }).join(", ") + "." });
+  if (flat.length) R.push({ ok: false, b: "Sans progression", t: flat.map(function (x) { return x.nom; }).join(", ") + "." });
+  var under = 0; W.forEach(function (w) { w.lines.forEach(function (l) { if (l.ko && l.droite === "sous la cible") under++; }); });
+  if (under) R.push({ ok: false, b: "Cible manquée", t: under + " séance" + (under > 1 ? "s" : "") + " avec des répétitions sous la cible." });
+  if (m.forme !== null && m.forme < 3) R.push({ ok: false, b: "Forme basse", t: "moyenne de " + fmt(m.forme) + " sur 5 avant les séances." });
+  m.retenir = R; m.bref = R.map(function (r) { return (r.b ? r.b + " : " : "") + r.t; }).join(" ");
+  var full = prog && W.length === bilWeeksOf(prog).filter(function (x) { return x <= today; }).length && W[0].mon === mondayOfDate(prog.debut);
+  m.titre = full ? "Bilan du bloc : " + (prog.titre || "programme") : W.length === 1 ? "Bilan de la semaine" + (W[0].w ? " " + W[0].w : " du " + fmtShort(W[0].mon)) : "Bilan de " + W.length + " semaines";
+  m.dates = fmtShort(m.from) + " au " + parse(m.to).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
+  return m;
+}
+function bilWeekLabel(w) { return w.w ? "Semaine " + w.w + (w.deload ? ", décharge" : "") : "Semaine du " + fmtShort(w.mon); }
+function bilRatio(w) { return w.planned !== null ? w.done + " / " + w.planned : String(w.done); }
+function bilOverviewHtml(m) {
+  var one = m.W.length === 1, h = '<div class="kpis"><div class="kpi"><b>' + (m.hasPlan && m.planned ? m.done + " / " + m.planned : m.done) + "</b><span>séances faites</span></div>";
+  h += '<div class="kpi"><b>' + (one || m.dPoids === null ? (m.poids ? fmt(m.poids) : "–") : (m.dPoids >= 0 ? "+" : "") + fmt(m.dPoids)) + "</b><span>" + (one || m.dPoids === null ? "poids moyen (kg)" : "kg, du début à la fin") + "</span></div>";
+  h += '<div class="kpi"><b>' + (m.forme !== null ? fmt(m.forme) : "–") + "</b><span>forme sur 5</span></div></div>";
+  if (m.ex.length) {
+    h += "<h3>" + (one ? "Exercices clés" : "Progression") + '</h3><div class="bil-ex">';
+    m.ex.forEach(function (x) {
+      h += '<div><b>' + esc(x.nom) + '</b><span class="s">' + esc(one || x.n < 2 ? bilSet(x.k, x.z) : bilSet(x.k, x.a) + " → " + bilSet(x.k, x.z)) + "</span>" + (x.evo !== null ? '<span class="' + (x.evo >= 1 ? "g" : "f") + '">' + bilEvo(x.evo) + "</span>" : "<span></span>") + "</div>";
+    });
+    h += "</div>" + (one ? "" : '<p class="tiny muted">Meilleure série de la première et de la dernière semaine notées.</p>');
+  }
+  h += "<h3>À retenir</h3>" + m.retenir.map(function (r) { return '<div class="note ' + (r.ok ? "ok" : "warn") + '">' + (r.b ? "<b>" + esc(r.b) + " :</b> " : "") + esc(r.t) + "</div>"; }).join("");
+  return h;
+}
+function bilDaysHtml(w) {
+  if (!w.lines.length) return '<p class="small muted">Aucune séance notée cette semaine.</p>';
+  var h = '<div class="bil-det">' + w.lines.map(function (l) { return '<div><span class="j">' + esc(fmtDayName(l.date) + " " + parse(l.date).getDate()) + "</span><span><b>" + esc(l.nom) + "</b>" + (l.txt ? " : " + esc(l.txt.replace(l.nom + " : ", "")) : "") + '</span><span class="r' + (l.ko ? " ko" : "") + '">' + esc(l.droite) + "</span></div>"; }).join("") + "</div>";
+  var bits = [w.poids ? "Poids moyen " + fmt(w.poids) + " kg" : "", w.sommeil !== null ? "sommeil " + fmtHours(w.sommeil) : "", w.charge ? "charge " + fmt(w.charge, 0) : ""].filter(Boolean);
+  if (bits.length) h += '<p class="tiny muted">' + esc(bits.join(", ")) + ".</p>";
+  w.notes.forEach(function (n) { h += '<p class="tiny muted">Remarque du ' + esc(fmtShort(n.date)) + " : « " + esc(n.t) + " »</p>"; });
+  return h;
+}
+function bilDetailHtml(m) {
+  if (m.W.length === 1) return bilDaysHtml(m.W[0]);
+  return '<div class="bil-weeks">' + m.W.map(function (w) {
+    var o = S.bilW === w.mon;
+    return '<button type="button" class="bil-w" data-act="bilw" data-d="' + w.mon + '" aria-expanded="' + o + '"><span><b>' + esc(bilWeekLabel(w)) + '</b><span class="small">' + esc(fmtShort(w.mon) + " au " + fmtShort(w.sun)) + '</span></span><span class="small muted">' + esc(bilRatio(w) + (w.forme !== null ? ", forme " + fmt(w.forme) : "")) + '</span><span class="chev2' + (o ? " o" : "") + '" aria-hidden="true"></span></button>' + (o ? '<div class="bil-in">' + bilDaysHtml(w) + "</div>" : "");
+  }).join("") + "</div>";
+}
+function bilDocHtml(m) {
+  if (!m) return '<p class="small muted">Rien à montrer pour l\'instant : aucune de ces semaines n\'a commencé.</p>';
+  var v = S.bilVue === "det" ? "det" : "ens";
+  var h = '<div class="bil-vue" role="group"><button type="button" data-act="bilvue" data-v="ens" aria-pressed="' + (v === "ens") + '">Vue d\'ensemble</button><button type="button" data-act="bilvue" data-v="det" aria-pressed="' + (v === "det") + '">Détail</button></div>';
+  h += v === "ens" ? bilOverviewHtml(m) : bilDetailHtml(m);
+  return h + '<div class="row"><button type="button" class="btn primary" data-act="bilpdf">Bilan en PDF</button></div><p class="tiny muted">Le PDF contient la vue d\'ensemble, puis le détail. Tu choisis à qui l\'envoyer ; rien ne part sans toi.</p>';
+}
+function bilCurrent() {
+  var b = S.bil; if (!b) return null;
+  if (b.k === "prog") { var p = D.programmes[b.id]; return p ? bilModel(bilWeeksOf(p), p) : null; }
+  return bilModel(b.weeks, null);
+}
+function bilPickWeeks() {
+  var out = [], today = todayStr();
+  bilProgs().forEach(function (p) { bilWeeksOf(p).forEach(function (m) { if (m <= today) out.push({ mon: m, p: p, w: weekOfProg(p, m) }); }); });
+  return out.sort(function (a, b) { return a.mon < b.mon ? 1 : -1; }).slice(0, 20);
+}
+function viewBilans() {
+  var h = '<div class="titled"><h1>Bilans</h1><p class="small muted">Tous les documents au même endroit : une semaine, plusieurs semaines ou un bloc entier.</p></div>';
+  var cur = mondayOfDate(todayStr()), sel = S.bilSel || {};
+  h += '<section class="sheet"><h2>Créer un bilan</h2><div class="pick-list">' +
+    '<button type="button" class="pick" data-act="bilsem"><span><b>Cette semaine</b><span class="small muted">Du ' + esc(fmtShort(cur)) + " au " + esc(fmtShort(addDays(cur, 6))) + '</span></span><span class="chev" aria-hidden="true">›</span></button>' +
+    '<button type="button" class="pick" data-act="bilpick"><span><b>Plusieurs semaines</b><span class="small muted">Tu coches celles que tu veux</span></span><span class="chev" aria-hidden="true">›</span></button></div>';
+  if (S.bilPick) {
+    var L = bilPickWeeks(), n = L.filter(function (x) { return sel[x.mon]; }).length;
+    h += '<div class="row"><button type="button" class="btn small" data-act="bilsel" data-v="4">Les 4 dernières</button>' + (P ? '<button type="button" class="btn small" data-act="bilsel" data-v="bloc">Tout le bloc</button>' : "") + '<button type="button" class="btn small quiet" data-act="bilsel" data-v="0">Aucune</button></div><div class="bil-chk">';
+    L.forEach(function (x) {
+      var w = bilWeek(x.mon);
+      h += '<button type="button" class="bil-c" data-act="bilchk" data-d="' + x.mon + '" role="checkbox" aria-checked="' + !!sel[x.mon] + '"><span class="box" aria-hidden="true">' + (sel[x.mon] ? "✓" : "") + "</span><span><b>Semaine " + x.w + '</b><span class="small muted">' + esc(fmtShort(x.mon) + " au " + fmtShort(addDays(x.mon, 6)) + (x.mon === cur ? ", en cours" : "") + (x.p !== P ? " · " + (x.p.titre || "autre bloc") : "")) + '</span></span><span class="small muted">' + esc(bilRatio(w)) + "</span></button>";
+    });
+    h += '</div><div class="row"><button type="button" class="btn primary" data-act="bilvoir"' + (n ? "" : " disabled") + ">Voir le bilan" + (n ? " (" + n + " semaine" + (n > 1 ? "s" : "") + ")" : "") + '</button><button type="button" class="btn" data-act="bilpick">Annuler</button></div>';
+  }
+  h += "</section>";
+  if (S.bil && S.bil.k === "sem") { var m = bilCurrent(); h += '<section class="sheet" id="bil-doc"><div class="sheet-head"><h2>' + esc(m ? m.titre : "Bilan") + '</h2><button type="button" class="linkbtn" data-act="bilclose">Fermer</button></div>' + (m ? '<p class="small muted">' + esc(m.dates) + "</p>" : "") + bilDocHtml(m) + "</section>"; }
+  var progs = bilProgs();
+  if (progs.length) h += '<div class="section"><h3>Bilans de bloc</h3><p class="small muted">Touche un bloc pour l\'ouvrir ou le refermer.</p></div>';
+  progs.forEach(function (p) {
+    var o = S.bil && S.bil.k === "prog" && S.bil.id === p.id, today = todayStr(), end = lastDayProg(p), fini = end < today, w = Math.min(p.semaines, Math.max(1, weekOfProg(p, today)));
+    h += '<section class="sheet"><button type="button" class="bil-h" data-act="bilprog" data-id="' + esc(p.id) + '" aria-expanded="' + o + '"><span><span class="h2">' + esc(p.titre || "Programme") + '</span><span class="small muted">' + (fini ? "Terminé" : p.debut > today ? "À venir" : "En cours, semaine " + w + " sur " + p.semaines + ", bilan provisoire") + " · " + esc(fmtShort(p.debut) + " au " + fmtShort(end)) + '</span></span><span class="chev2' + (o ? " o" : "") + '" aria-hidden="true"></span></button>';
+    if (o) h += bilDocHtml(bilCurrent());
+    h += "</section>";
+  });
+  return h;
+}
+/* ---------- PDF : écrit à la main (A4, Helvetica), sans bibliothèque, pour marcher hors ligne ---------- */
+var HELV = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
+var WIN = { "€": 128, "…": 133, "Œ": 140, "‘": 145, "’": 146, "“": 147, "”": 148, "–": 150, "—": 151, "œ": 156 };
+function pdfClean(t) { return String(t === undefined || t === null ? "" : t).replace(/[   ]/g, " ").replace(/→/g, "à").replace(/≈/g, "env. ").replace(/ᵉʳ/g, "er").replace(/✓/g, "").replace(/[−]/g, "-"); }
+function pdfCode(ch) { var c = ch.charCodeAt(0); if (c < 128 || (c >= 160 && c <= 255)) return c; return WIN[ch] || 63; }
+function pdfW(t, size, bold) {
+  var w = 0; for (var i = 0; i < t.length; i++) { var c = pdfCode(t[i]); if (c > 126) { var b = t[i].normalize("NFD").charCodeAt(0); c = b >= 32 && b <= 126 ? b : 110; } w += HELV[c - 32] || 556; }
+  return w / 1000 * size * (bold ? 1.07 : 1);
+}
+function pdfHex(t) { var h = ""; for (var i = 0; i < t.length; i++) h += ("0" + pdfCode(t[i]).toString(16)).slice(-2); return "<" + h + ">"; }
+function pdfMake() {
+  var PW = 595, PH = 842, M = 44, CW = PW - 2 * M, pages = [], cur = null, y = 0;
+  var COL = { ink: "0.11 0.125 0.145", steel: "0.38 0.42 0.46", blue: "0.118 0.357 0.839", ok: "0.17 0.48 0.29", ko: "0.66 0.38 0", rule: "0.86 0.87 0.85", soft: "0.9 0.93 0.985" };
+  function page() { cur = []; pages.push(cur); y = PH - M; }
+  function need(h) { if (!cur || y - h < M + 14) page(); }
+  function txt(t, x, yy, size, bold, col) { cur.push((COL[col] || COL.ink) + " rg BT /F" + (bold ? 2 : 1) + " " + size + " Tf " + x.toFixed(1) + " " + yy.toFixed(1) + " Td " + pdfHex(t) + " Tj ET"); }
+  function line(x1, yy, x2, col, w) { cur.push((COL[col] || COL.rule) + " RG " + (w || 0.6) + " w " + x1.toFixed(1) + " " + yy.toFixed(1) + " m " + x2.toFixed(1) + " " + yy.toFixed(1) + " l S"); }
+  function wrap(t, size, bold, maxw) {
+    var out = [], l = "";
+    pdfClean(t).split(/\s+/).forEach(function (w) { if (!w) return; var c = l ? l + " " + w : w; if (pdfW(c, size, bold) <= maxw || !l) l = c; else { out.push(l); l = w; } });
+    if (l) out.push(l); return out.length ? out : [""];
+  }
+  var A = {
+    title: function (t, right) { need(40); txt(pdfClean(t), M, y - 16, 17, true); if (right) { var r = pdfClean(right); txt(r, PW - M - pdfW(r, 10), y - 16, 10, false, "steel"); } y -= 24; line(M, y, PW - M, "ink", 1.4); y -= 16; },
+    h3: function (t) { need(34); y -= 6; txt(pdfClean(t), M, y - 9, 11, true, "blue"); y -= 18; },
+    para: function (t, o) { o = o || {}; var s = o.size || 10, L = wrap(t, s, o.bold, CW - (o.pad || 0) * 2); L.forEach(function (l) { need(s + 4); txt(l, M + (o.pad || 0), y - s, s, o.bold, o.col); y -= s + 4; }); y -= o.after === undefined ? 4 : o.after; },
+    box: function (label, t) {
+      var L = wrap(label + " " + t, 10, false, CW - 20), hgt = L.length * 14 + 14; need(hgt + 6);
+      cur.push(COL.soft + " rg " + M + " " + (y - hgt).toFixed(1) + " " + CW + " " + hgt + " re f");
+      L.forEach(function (l, i) { var yy = y - 18 - i * 14; if (i === 0 && l.indexOf(label) === 0) { txt(label, M + 10, yy, 10, true); txt(l.slice(label.length), M + 10 + pdfW(label, 10, true), yy, 10); } else txt(l, M + 10, yy, 10); });
+      y -= hgt + 12;
+    },
+    stats: function (items) { need(46); var w = CW / items.length; items.forEach(function (it, i) { txt(pdfClean(it[0]), M + i * w, y - 16, 16, true); txt(pdfClean(it[1]), M + i * w, y - 29, 8.5, false, "steel"); }); y -= 44; },
+    table: function (cols, rows) {
+      var xs = [], x = M; cols.forEach(function (c) { xs.push(x); x += c.w * CW; });
+      need(30); cols.forEach(function (c, i) { txt(pdfClean(c.t), xs[i] + 2, y - 8, 8, false, "steel"); }); y -= 13; line(M, y, PW - M, "rule", 0.8);
+      rows.forEach(function (r) {
+        var cells = r.map(function (c, i) { var o = typeof c === "object" && c !== null ? c : { t: c }; return { L: wrap(o.t === undefined || o.t === null ? "" : String(o.t), 9, o.b, cols[i].w * CW - 6), o: o }; });
+        var hgt = Math.max.apply(null, cells.map(function (c) { return c.L.length; })) * 11.5 + 7; need(hgt);
+        cells.forEach(function (c, i) { c.L.forEach(function (l, k) { txt(l, xs[i] + 2, y - 11.5 - k * 11.5, 9, c.o.b, c.o.col); }); });
+        y -= hgt; line(M, y, PW - M, "rule", 0.5);
+      });
+      y -= 8;
+    },
+    space: function (n) { y -= n; }, page: page,
+    bytes: function (footer) {
+      var objs = [], n = pages.length, kids = [];
+      objs[1] = "<< /Type /Catalog /Pages 2 0 R >>";
+      objs[3] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>";
+      objs[4] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>";
+      pages.forEach(function (pg, i) {
+        var f = pdfClean(footer + ", page " + (i + 1) + " sur " + n);
+        var st = pg.concat([COL.steel + " rg BT /F1 8 Tf " + M + " 26 Td " + pdfHex(f) + " Tj ET"]).join("\n");
+        objs[5 + 2 * i] = "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " + PW + " " + PH + "] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents " + (6 + 2 * i) + " 0 R >>";
+        objs[6 + 2 * i] = "<< /Length " + st.length + " >>\nstream\n" + st + "\nendstream"; kids.push((5 + 2 * i) + " 0 R");
+      });
+      objs[2] = "<< /Type /Pages /Kids [" + kids.join(" ") + "] /Count " + n + " >>";
+      var out = "%PDF-1.4\n", offs = [];
+      for (var k = 1; k < objs.length; k++) { offs[k] = out.length; out += k + " 0 obj\n" + objs[k] + "\nendobj\n"; }
+      var xr = out.length; out += "xref\n0 " + objs.length + "\n0000000000 65535 f \n";
+      for (k = 1; k < objs.length; k++) out += ("0000000000" + offs[k]).slice(-10) + " 00000 n \n";
+      out += "trailer\n<< /Size " + objs.length + " /Root 1 0 R >>\nstartxref\n" + xr + "\n%%EOF\n";
+      var u = new Uint8Array(out.length); for (k = 0; k < out.length; k++) u[k] = out.charCodeAt(k) & 255; return u;
+    }
+  };
+  page(); return A;
+}
+function bilPdfBytes(m) {
+  var A = pdfMake(), one = m.W.length === 1, ko = function (l) { return l.ko ? "ko" : undefined; };
+  A.title(m.titre, m.dates);
+  A.box("En bref :", m.bref);
+  A.stats([[m.hasPlan && m.planned ? m.done + " / " + m.planned : String(m.done), "séances faites"], [m.poids ? fmt(m.poids) + " kg" : "–", one || m.dPoids === null ? "poids moyen" : "poids (" + (m.dPoids >= 0 ? "+" : "") + fmt(m.dPoids) + " kg)"], [fmtHours(m.sommeil), "sommeil moyen"], [m.forme !== null ? fmt(m.forme) : "–", "forme sur 5 avant les séances"]]);
+  if (!one) {
+    A.h3("Semaine par semaine");
+    A.table([{ t: "Semaine", w: 0.34 }, { t: "Séances", w: 0.14 }, { t: "Forme", w: 0.12 }, { t: "Sommeil", w: 0.14 }, { t: "Poids (kg)", w: 0.13 }, { t: "Charge", w: 0.13 }],
+      m.W.map(function (w) { return [bilWeekLabel(w) + ", " + fmtShort(w.mon), bilRatio(w), w.forme !== null ? fmt(w.forme) : "–", fmtHours(w.sommeil), w.poids ? fmt(w.poids) : "–", w.charge ? fmt(w.charge, 0) : "–"]; }));
+  }
+  if (m.ex.length) {
+    A.h3(one ? "Exercices clés : meilleure série" : "Exercices clés : meilleure série de la première et de la dernière semaine");
+    if (one) A.table([{ t: "Exercice", w: 0.6 }, { t: "Meilleure série", w: 0.4 }], m.ex.map(function (x) { return [x.nom, bilSet(x.k, x.z)]; }));
+    else A.table([{ t: "Exercice", w: 0.4 }, { t: "Début", w: 0.2 }, { t: "Fin", w: 0.2 }, { t: "Évolution", w: 0.2 }], m.ex.map(function (x) { return [x.nom, bilSet(x.k, x.a), x.n > 1 ? bilSet(x.k, x.z) : "–", x.evo === null ? "–" : { t: bilEvo(x.evo), b: true, col: x.evo >= 1 ? "ok" : "ko" }]; }));
+  }
+  A.h3("À retenir");
+  m.retenir.forEach(function (r) { A.para((r.b ? r.b + " : " : "") + r.t, { col: r.ok ? "ink" : "ko", after: 1 }); });
+  if (m.skipped.length) { A.h3("Séances sautées ou remplacées"); m.skipped.forEach(function (s) { A.para(fmtDayName(s.date) + " " + fmtShort(s.date) + " : " + bilName(s) + " " + smodText(s) + ".", { after: 1 }); }); }
+  if (m.notes.length) { A.h3("Remarques de l'athlète"); m.notes.forEach(function (n) { A.para(fmtShort(n.date) + " : « " + n.t + " »", { after: 1 }); }); }
+  m.W.forEach(function (w, i) {
+    if (!one || i) A.page(); else A.space(10);
+    if (!one) A.title(bilWeekLabel(w), fmtShort(w.mon) + " au " + fmtShort(w.sun)); else A.h3("Détail de la semaine");
+    if (!w.lines.length) A.para("Aucune séance notée cette semaine.", { col: "steel" });
+    else A.table([{ t: "Jour", w: 0.12 }, { t: "Séance", w: 0.24 }, { t: "Fait", w: 0.46 }, { t: "", w: 0.18 }], w.lines.map(function (l) { return [fmtDayName(l.date) + " " + parse(l.date).getDate(), { t: l.nom, b: true }, l.txt.replace(l.nom + " : ", "") + (l.forme !== null ? " (forme " + fmt(l.forme) + ")" : ""), { t: l.droite, col: ko(l), b: l.ko }]; }));
+    var bits = [w.poids ? "Poids moyen " + fmt(w.poids) + " kg" : "", w.sommeil !== null ? "sommeil " + fmtHours(w.sommeil) : "", w.charge ? "charge " + fmt(w.charge, 0) + " (durée × difficulté)" : ""].filter(Boolean);
+    if (bits.length) A.para(bits.join(", ") + ".", { col: "steel", size: 9 });
+    w.notes.forEach(function (n) { A.para("Remarque du " + fmtShort(n.date) + " : « " + n.t + " »", { size: 9, after: 1 }); });
+  });
+  return A.bytes("Carnet de musculation, " + m.titre);
+}
+function bilPdf() {
+  var m = bilCurrent(); if (!m) return;
+  var bytes = bilPdfBytes(m), name = "bilan-" + m.from + "-" + m.to + ".pdf", blob = new Blob([bytes], { type: "application/pdf" });
+  var file = null; try { file = new File([blob], name, { type: "application/pdf" }); } catch (err) {}
+  if (file && navigator.canShare && navigator.canShare({ files: [file] })) { navigator.share({ files: [file], title: m.titre }).then(function () { toast("Bilan prêt."); }, function () {}); return; }
+  var url = URL.createObjectURL(blob), a = document.createElement("a");
+  a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+  toast("Bilan téléchargé : " + name);
+}
+function bilAct(b) {
+  var a = b.dataset.act, cur = mondayOfDate(todayStr());
+  if (a === "bilsem") { S.bil = { k: "sem", weeks: [cur] }; S.bilPick = false; S.bilW = null; }
+  else if (a === "bilpick") { S.bilPick = !S.bilPick; if (S.bilPick && !S.bilSel) { S.bilSel = {}; S.bilSel[cur] = true; } }
+  else if (a === "bilchk") { S.bilSel = S.bilSel || {}; if (S.bilSel[b.dataset.d]) delete S.bilSel[b.dataset.d]; else S.bilSel[b.dataset.d] = true; }
+  else if (a === "bilsel") { S.bilSel = {}; var L = bilPickWeeks(); if (b.dataset.v === "4") L.slice(0, 4).forEach(function (x) { S.bilSel[x.mon] = true; }); else if (b.dataset.v === "bloc") L.forEach(function (x) { if (x.p === P) S.bilSel[x.mon] = true; }); }
+  else if (a === "bilvoir") { var w = keysOf(S.bilSel || {}).sort(); if (!w.length) return; S.bil = { k: "sem", weeks: w }; S.bilPick = false; S.bilW = null; }
+  else if (a === "bilprog") { S.bil = S.bil && S.bil.k === "prog" && S.bil.id === b.dataset.id ? null : { k: "prog", id: b.dataset.id }; S.bilW = null; }
+  else if (a === "bilvue") S.bilVue = b.dataset.v;
+  else if (a === "bilw") S.bilW = S.bilW === b.dataset.d ? null : b.dataset.d;
+  else if (a === "bilclose") S.bil = null;
+  else if (a === "bilpdf") { bilPdf(); return; }
+  render();
+}
+
 /* ================= Événements ================= */
 document.getElementById("tabs").addEventListener("click", function (ev) {
   var b = ev.target.closest(".tab"); if (!b) return;
@@ -4332,6 +4628,7 @@ function onAct(ev) {
       doc = docFor(b.dataset.col, b.dataset.id); var cur = getPath(doc, b.dataset.path), v = b.dataset.v;
       if (/^\d+$/.test(v)) v = Number(v);
       setPath(doc, b.dataset.path, String(cur) === String(v) ? null : v); persist(); render(); break;
+    case "bilsem": case "bilpick": case "bilchk": case "bilsel": case "bilvoir": case "bilprog": case "bilvue": case "bilw": case "bilclose": case "bilpdf": bilAct(b); break;
     case "chgset": doc = docFor("seances", b.dataset.id); doc.chg = doc.chg || {}; if (b.dataset.v === "") delete doc.chg[b.dataset.ex]; else doc.chg[b.dataset.ex] = Number(b.dataset.v); if (!keysOf(doc.chg).length) delete doc.chg; persist(); render(); break;
     case "toggle": doc = docFor(b.dataset.col, b.dataset.id); setPath(doc, b.dataset.path, getPath(doc, b.dataset.path) ? null : true); persist(); render(); break;
     case "fill":

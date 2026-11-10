@@ -97,8 +97,8 @@ p { margin: 0; }
 /* ---------- Tabs ---------- */
 .tabs {
   position: sticky; top: 0; z-index: 10;
-  display: grid; grid-template-columns: repeat(3, 1fr);
-  max-width: 600px; margin: 0 auto; padding: 0 10px;
+  display: grid; grid-template-columns: 1.25fr 1fr 1fr 1fr;
+  max-width: 600px; margin: 0 auto; padding: 0 6px;
   background: var(--chalk);
   border-bottom: 1px solid var(--rule);
 }
@@ -472,3 +472,36 @@ ul.rules { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
 
 /* Bouton « Séance sautée ou remplacée » : couleur des imprévus */
 .btn.smod-btn { border-color: var(--caution); color: var(--caution); background: var(--caution-soft); font-weight: 650; }
+
+/* Bilans */
+.bil-vue { display: grid; grid-template-columns: 1fr 1fr; padding: 3px; border-radius: 10px; background: var(--chalk); }
+.bil-vue button { border: 0; background: none; padding: 8px 0; border-radius: 8px; font: inherit; font-weight: 600; color: var(--steel); cursor: pointer; }
+.bil-vue button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.14); }
+.bil-h, .bil-w { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; width: 100%; border: 0; background: none; padding: 0; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.bil-h .h2 { display: block; font-size: 19px; font-weight: 700; font-stretch: 106%; }
+.bil-h .small, .bil-w .small { display: block; }
+.bil-w { grid-template-columns: 1fr auto auto; padding: 12px 0; border-bottom: 1px solid var(--rule); }
+.bil-w b { font-weight: 650; }
+.bil-weeks { display: grid; }
+.bil-in { padding: 6px 0 12px; border-bottom: 1px solid var(--rule); display: grid; gap: 6px; }
+.chev2 { width: 9px; height: 9px; border-right: 2px solid var(--steel); border-bottom: 2px solid var(--steel); transform: rotate(-45deg); margin: 0 6px; }
+.chev2.o { transform: rotate(45deg); margin-top: -5px; }
+.bil-ex { display: grid; }
+.bil-ex > div { display: grid; grid-template-columns: 1fr auto auto; gap: 4px 12px; align-items: baseline; padding: 10px 0; border-bottom: 1px solid var(--rule); }
+.bil-ex > div:last-child { border-bottom: 0; }
+.bil-ex b { font-weight: 650; }
+.bil-ex .s { color: var(--steel); font-size: 14px; font-variant-numeric: tabular-nums; }
+.bil-ex .g { color: var(--ok); font-weight: 700; }
+.bil-ex .f { color: var(--caution); font-weight: 700; }
+.bil-det { display: grid; }
+.bil-det > div { display: grid; grid-template-columns: 52px 1fr auto; gap: 8px; padding: 7px 0; font-size: 14px; align-items: baseline; }
+.bil-det b { font-weight: 650; }
+.bil-det .j { color: var(--steel); }
+.bil-det .r { color: var(--steel); font-size: 13px; text-align: right; }
+.bil-det .r.ko { color: var(--caution); font-weight: 650; }
+.bil-chk { display: grid; border-top: 1px solid var(--rule); }
+.bil-c { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; padding: 11px 0; border: 0; border-bottom: 1px solid var(--rule); background: none; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.bil-c b { display: block; font-weight: 650; }
+.bil-c .small { display: block; }
+.bil-c .box { width: 24px; height: 24px; border-radius: 7px; border: 2px solid var(--rule); display: grid; place-items: center; color: var(--on-plate); font-size: 14px; font-weight: 700; }
+.bil-c[aria-checked="true"] .box { background: var(--plate); border-color: var(--plate); }
