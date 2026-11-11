@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.15.0";
+var APP_VERSION = "1.15.1";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -1153,9 +1153,9 @@ function sportHard(s) { return s.intensite === "Très dure" || (s.bilan && toNum
 function stypeEffect(s) { if (!s || !s.stype) return null; if (s.stype === "Technique") return "none"; if (s.stype === "Compétition") return "hard"; return sportHard(s) ? "hard" : "none"; }
 function stypeNote(s) {
   var e = stypeEffect(s); if (!e) return null;
-  if (s.stype === "Technique") return { cls: "info", t: "Séance technique : le planning des jours suivants ne change pas." };
+  if (s.stype === "Technique") return { cls: "info", t: "Séance technique : le planning reste celui d'une séance de sport habituelle." };
   if (s.stype === "Compétition") return { cls: "warn", t: "<b>Compétition : demain, ni bas du corps ni fractionné.</b> Le planning en tient compte ; reprise possible le surlendemain." };
-  return e === "hard" ? { cls: "warn", t: "<b>Combats très durs : demain, ni bas du corps ni fractionné.</b> Le planning en tient compte." } : { cls: "info", t: "Combats sans difficulté particulière : le planning ne change pas. Il s'adapte si tu notes la séance très dure (intensité « Très dure » ou difficulté de 8 et plus)." };
+  return e === "hard" ? { cls: "warn", t: "<b>Combats très durs : demain, ni bas du corps ni fractionné.</b> Le planning en tient compte." } : { cls: "info", t: "Combats sans difficulté particulière : le planning reste celui d'une séance de sport habituelle. Il protège le lendemain si tu notes la séance très dure (intensité « Très dure » ou difficulté de 8 et plus)." };
 }
 function bodySport(def, s, id) {
   var h = (def.info ? '<p class="small muted">' + esc(def.info) + "</p>" : "") + checkin(s, id) + '<div class="hr"></div><p class="small muted">Après la séance, note son intensité : elle sert à doser la séance du lendemain.</p>';
@@ -3612,7 +3612,7 @@ function dayActual(date) {
     if (isCardioType(s.type)) { var ci = cardioInfo(s) || {}; add({ frac: ci.ctype === "fractionne", dur: ci.ctype === "fractionne", name: cardioTitle(s) }); return; }
     var w = s.semaine || (P && inBlock(date) ? weekOf(date) : 1), d = s.plan ? { kind: "muscu", ex: s.plan.ex.map(function (x) { return { mu: x.mu, cat: x.cat, sets: [] }; }) } : sessionDef(s.type);
     var p = profDef(s.type, d || defOf(s), w); p.name = shortName(s.type);
-    var se = p.sport ? stypeEffect(s) : null; if (se === "none") { p.sport = false; p.dur = false; } else if (se === "hard") p.cdur = true;
+    if (p.sport && stypeEffect(s) === "hard") p.cdur = true;
     add(p);
   });
   return a;
