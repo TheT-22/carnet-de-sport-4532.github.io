@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.15.1";
+var APP_VERSION = "1.16.0";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -618,7 +618,7 @@ function viewJour() {
   if (plan === null && P && (P.question || versionKeys().length > 1)) h += choiceSheet(w);
   h += weightSheet(date);
   h += flexAsk(date) + autoTodayNote(date) + fixedRepeatNote(date);
-  if (autoOn() && inBlock(date) && date > todayStr()) h += '<div class="note info">Prévision : le carnet ajuste la séance de ce jour selon tes réponses et tes séances d\'ici là.</div>';
+  if (autoOn() && inBlock(date) && date > todayStr()) h += '<div class="note info">Prévision : le carnet ajuste la séance de ce jour selon tes réponses et tes séances d\'ici là.' + (plj(date).sambo === "oui" ? " Tu as indiqué y aller ce jour-là." : "") + "</div>";
   var types = (plan || compPlanned(date)).slice();
   valuesOf(D.seances).forEach(function (s) { if (s.date === date && types.indexOf(s.type) < 0 && s.type !== LIBRE && !isCardioType(s.type) && (hasData(s) || s.ajoutee || (s.smod && s.smod.statut)) && (sessionDef(s.type) || (hasData(s) && defOf(s)))) types.push(s.type); });
   if (!types.length && plan !== null && !libreOf(date) && !cardioOf(date).length) h += freeSheet(date);
@@ -3705,6 +3705,9 @@ function weekPlan(mon, nf) {
     else if (pj.sambo === "oui" && ft) forced[start] = { t: ft };
     else if (pj.sambo === "non" || nf) forced[start] = { noflex: true };
   }
+  /* jours à venir : réponse donnée à l'avance au sport à jours variables */
+  var ftA = flexTypes()[0];
+  if (ftA) days.forEach(function (d, i) { if (i < start || d <= today || forced[i]) return; var a = plj(d).sambo; if (a === "oui") forced[i] = { t: ftA }; else if (a === "non") forced[i] = { noflex: true }; });
   var free = []; for (var j = start; j < 7; j++) free.push(j);
   var best = { cost: Infinity, asg: null }, W = w;
   var uniq = function (arr) { var seen = {}; return arr.filter(function (x) { var k = x.t + (x.flex ? "f" : ""); if (seen[k]) return false; seen[k] = 1; return true; }); };
@@ -3795,17 +3798,18 @@ function autoPlanned(date) {
 }
 /* ---------- Écrans ---------- */
 function flexAsk(date) {
-  if (!autoOn() || date !== todayStr() || !inBlock(date)) return "";
+  if (!autoOn() || date < todayStr() || !inBlock(date)) return "";
+  var futur = date > todayStr();
   var ft = flexTypes()[0]; if (!ft) return "";
   var f = flexOf(ft), di = dow(date); if (f.jours.indexOf(di) < 0) return "";
   if (dayActual(date) && !(plj(date).sambo)) return "";
   var wp = weekPlan(mondayOfDate(date)), doneN = wp.done.filter(function (x) { return x.t === ft; }).length, pj = plj(date), nm = P.sessions[ft].name;
   var extra = doneN >= (f.fois || 0);
   if (extra && pj.sambo !== "oui" && doneN > (f.fois || 0)) return "";
-  var h = '<section class="sheet"><div class="sheet-head"><h2>' + esc(nm) + " ce soir ?</h2></div>";
-  h += '<p class="small muted">' + (extra ? "Ce serait ton " + (doneN + 1) + "e de la semaine : le carnet retirera la séance la moins prioritaire pour garder un jour de repos." : "Tu peux y aller " + joursTxt(f.jours) + ". Réponds quand tu sais, même en fin de journée : la semaine s'ajuste.") + "</p>";
-  if (!pj.sambo && !extra) { var fr = weekPlan(mondayOfDate(date), false), nfp = weekPlan(mondayOfDate(date), true); if (fr.asg[di] === ft && fr.cost + 2 < nfp.cost) h += '<p class="small"><b>Conseil :</b> ce soir est un bon soir pour y aller, la fin de semaine se place mieux.</p>'; }
-  h += '<div class="seg" role="group">' + [["oui", "Oui"], ["non", "Non"], ["", "Je ne sais pas encore"]].map(function (o) { return '<button type="button" data-act="flexans" data-v="' + o[0] + '" aria-pressed="' + ((pj.sambo || "") === o[0]) + '">' + o[1] + "</button>"; }).join("") + "</div>";
+  var h = '<section class="sheet"><div class="sheet-head"><h2>' + esc(nm) + (futur ? " " + JOURS_L[di] : " ce soir") + " ?</h2></div>";
+  h += '<p class="small muted">' + (futur && !extra ? "Si tu sais déjà que tu iras ce jour-là, dis-le : le carnet organise les autres jours autour. Tu pourras changer d'avis jusqu'au jour même." : extra ? "Ce serait ton " + (doneN + 1) + "e de la semaine : le carnet retirera la séance la moins prioritaire pour garder un jour de repos." : "Tu peux y aller " + joursTxt(f.jours) + ". Réponds quand tu sais, même en fin de journée : la semaine s'ajuste.") + "</p>";
+  if (!pj.sambo && !extra && !futur) { var fr = weekPlan(mondayOfDate(date), false), nfp = weekPlan(mondayOfDate(date), true); if (fr.asg[di] === ft && fr.cost + 2 < nfp.cost) h += '<p class="small"><b>Conseil :</b> ce soir est un bon soir pour y aller, la fin de semaine se place mieux.</p>'; }
+  h += '<div class="seg" role="group">' + [["oui", "Oui"], ["non", "Non"], ["", "Je ne sais pas encore"]].map(function (o) { return '<button type="button" data-act="flexans" data-d="' + date + '" data-v="' + o[0] + '" aria-pressed="' + ((pj.sambo || "") === o[0]) + '">' + o[1] + "</button>"; }).join("") + "</div>";
   return h + "</section>";
 }
 var JOURS_L = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"];
@@ -3900,7 +3904,7 @@ function forcerDialog(date, t, why, cur) {
 }
 function planAct(b) {
   var a = b.dataset.act, today = todayStr();
-  if (a === "flexans") { var pj = plj(today, true), v = b.dataset.v || null; if (pj.sambo === v || !v) delete pj.sambo; else pj.sambo = v; delete pj.choix; delete pj.force; persist(); render(); return; }
+  if (a === "flexans") { var pj = plj(b.dataset.d || today, true), v = b.dataset.v || null; if (pj.sambo === v || !v) delete pj.sambo; else pj.sambo = v; delete pj.choix; delete pj.force; persist(); render(); return; }
   if (a === "autreseance") { autreSheet(today); return; }
   if (a === "autreraz") { var p2 = plj(today, true); delete p2.choix; delete p2.force; persist(); render(); return; }
   if (a === "forcer") { var t = b.dataset.t, wp = weekPlan(mondayOfDate(today)); forcerDialog(today, t, "plus de place cette semaine sans enchaîner des séances qui se gênent", wp.asg[dow(today)]); return; }
