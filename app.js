@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.16.0";
+var APP_VERSION = "1.16.1";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -114,6 +114,7 @@ var CATALOGUE = [
     { k: "ext-halt", n: "Extension triceps, haltère", gr: "push", mu: { triceps: 1 } }] },
   { g: "Jambes", ex: [
     { k: "squat", n: "Squat", gr: "jambes", mu: { quadri: 1 } },
+    { k: "front-squat", n: "Front squat, barre", gr: "jambes", mu: { quadri: 1 } },
     { k: "squat-halt", n: "Squat, haltères", per: true, gr: "jambes", mu: { quadri: 1 } },
     { k: "fentes", n: "Fentes avant", per: true, gr: "jambes", mu: { quadri: 1 } },
     { k: "hack-squat", n: "Hack squat", gr: "jambes", mu: { quadri: 1 } },
@@ -158,7 +159,7 @@ var BANK_MATCH = [
   ["tirage-vert", ["tirage vertical"]], ["tirage-horiz", ["tirage horizontal"]], ["row-1b", ["rowing", "un bras"]], ["row-barre", ["rowing", "barre"]],
   ["tractions-neutre", ["traction", "neutre"]], ["tractions-supi", ["traction", "supination"]], ["tractions", ["traction"]], ["curl-incl", ["curl", "incline"]], ["curl-halt", ["curl", "haltere"]], ["curl-barre", ["curl", "barre"]],
   ["ext-tete", ["extension", "triceps", "tete"]], ["ext-halt", ["extension", "triceps", "haltere"]], ["ext-poulie", ["extension", "triceps", "poulie"]],
-  ["squat-halt", ["squat", "haltere"]], ["squat", ["squat", "barre"]], ["hack-squat", ["hack"]], ["fente-bulg", ["fente bulgare"]], ["fentes", ["fentes avant"]],
+  ["front-squat", ["front squat"]], ["front-squat", ["squat", "avant"]], ["squat-halt", ["squat", "haltere"]], ["squat", ["squat", "barre"]], ["hack-squat", ["hack"]], ["fente-bulg", ["fente bulgare"]], ["fentes", ["fentes avant"]],
   ["sdtr-halt", ["roumain", "haltere"]], ["sdtr-barre", ["roumain"]], ["sdt", ["souleve de terre"]], ["mollets", ["mollet"]]
 ];
 var matchCache = {};
