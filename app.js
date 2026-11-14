@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.16.1";
+var APP_VERSION = "1.17.0";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -334,7 +334,7 @@ function plannedBase(date) {
   if (date === P.debut && P.sessions.MENSU && !P.cree) out.unshift("MENSU");
   return out;
 }
-var NOT_DATA = ["date", "type", "semaine", "programme", "checkin", "ajoutee", "maj", "libre", "lieu", "remplace", "liste", "nU", "cardio", "sport", "ctype", "fmt", "velMes", "nSer", "nRep", "legacy", "fplan", "ftexte", "fsport", "fctype", "fspec", "adapte", "alerteA", "pour", "avanceDe", "garderSeries", "modele", "chg", "stype"];
+var NOT_DATA = ["date", "type", "semaine", "programme", "checkin", "ajoutee", "maj", "libre", "lieu", "remplace", "liste", "nU", "cardio", "sport", "ctype", "fmt", "velMes", "nSer", "nRep", "legacy", "fplan", "ftexte", "fsport", "fctype", "fspec", "adapte", "alerteA", "pour", "avanceDe", "garderSeries", "modele", "chg", "stype", "change", "zr", "compte"];
 function hasData(s) {
   if (!s) return false;
   return keysOf(s).some(function (k) { if (k === "smod") return !!(s.smod && s.smod.statut); return NOT_DATA.indexOf(k) < 0 && s[k] !== undefined && s[k] !== null && JSON.stringify(s[k]) !== "{}"; });
@@ -350,7 +350,7 @@ function seance(date, type, create) {
 }
 function dayDone(date) {
   var types = plannedFor(date), libDone = anyData(date);
-  function ok(t) { var x = seance(date, t); return hasData(x) || replacedDone(date, t) || !!(x && x.adapte && x.adapte.repos); }
+  function ok(t) { var x = seance(date, t); return hasData(x) || replacedAny(date, t) || !!(x && x.adapte && x.adapte.repos); }
   if (!types || !types.length) return libDone ? true : null;
   var real = types.filter(function (t) { return t !== "REPOS" && !isSkipped(seance(date, t)); });
   if (!real.length) return libDone ? true : null;
@@ -359,8 +359,9 @@ function dayDone(date) {
 /* Séance libre du jour et séance prévue qu'elle remplace */
 function libreOf(date) { return D.seances[seanceId(date, LIBRE)]; }
 function isReplaced(date, t) { var l = libreOf(date); return !!(l && l.remplace === t); }
-function replacedDone(date, t) { var l = libreOf(date); return !!(l && l.remplace === t && hasData(l)); }
-function lieuLabel(v) { for (var i = 0; i < LIEUX.length; i++) if (LIEUX[i].v === v) return LIEUX[i].l; return "Hors salle"; }
+function replacedDone(date, t) { var l = libreOf(date); if (!(l && l.remplace === t && hasData(l))) return false; return !l.zr || libreCompte(l, t, date).compte; }
+function replacedAny(date, t) { var l = libreOf(date); return !!(l && l.remplace === t && hasData(l)); }
+function lieuLabel(v) { if (v === "club") return "À ta salle"; for (var i = 0; i < LIEUX.length; i++) if (LIEUX[i].v === v) return LIEUX[i].l; return "Hors salle"; }
 function shortName(t) { var d = sessionDef(t); return d ? d.short || d.name : t; }
 function libreSub(s) { return lieuLabel(s.lieu) + (s.modele ? " · " + s.modele : "") + (s.remplace ? " · remplace " + shortName(s.remplace) : ""); }
 
@@ -625,6 +626,7 @@ function viewJour() {
   if (!types.length && plan !== null && !libreOf(date) && !cardioOf(date).length) h += freeSheet(date);
   keysOf(D.avances || {}).forEach(function (k) { var i = k.lastIndexOf("_"); if (k.slice(0, i) === date) h += '<div class="note info">' + esc(shortName(k.slice(i + 1))) + " a été avancée au " + esc(fmtLong(D.avances[k])) + ".</div>"; });
   h += fatigueBanner(date, types);
+  types.sort(function (a, b) { function c(t) { var x = seance(date, t); return x && x.change && x.smod ? 0 : 1; } return c(a) - c(b); });
   types.forEach(function (t) { if (!isReplaced(date, t)) h += sessionSheet(date, t, w); });
   if (libreOf(date)) h += libreSheet(date);
   cardioOf(date).forEach(function (s) { h += cardioSheet(date, s); });
@@ -700,6 +702,8 @@ function sessionSheet(date, type, w) {
   else st = hasData(s) ? '<span class="state done">Notée</span>' : ld ? '<span class="state alt">Adaptée</span>' : s.adapte && s.adapte.repos ? '<span class="state alt">Repos</span>' : s.adapte ? '<span class="state alt">Adaptée</span>' : '<span class="state">À faire</span>';
   var h = '<section class="sheet" id="sess-' + esc(id) + '"><div class="sheet-head"><h2>' + esc(s.plan ? s.plan.name : other || !sessionDef(type) || def.custom ? def.name || type : sessionName(type, date)) + "</h2>" + (def.kind === "repos" ? "" : st) + "</div>";
   if (s.pour) h += '<p class="small muted">' + (s.avanceDe ? "Avancée du " + esc(fmtLong(s.avanceDe)) + ", à la place de « " : "À la place de « ") + esc(shortName(s.pour)) + " ».</p>";
+  if (s.change && s.smod && s.smod.statut) { CK = null; return h + chgNote(date, type, s, id) + "</section>"; }
+  if (canChange(date, type, def, s)) h += chgLine(date, type, s, id);
   var smOpen = smk && ((s.smod && s.smod.statut) || (S.smodOpen && S.smodOpen[id]));
   CK = smk ? { kind: def.kind, name: def.name, id: id, smod: !smOpen && !hasData(s) } : null;
   if (smOpen) { var ckh = (def.kind === "tests" || def.kind === "mensu") ? "" : checkin(s, id); CK = null; return h + ckh + '<div data-smod="' + esc(id) + '">' + smodPanel(date, type, def, s, id) + "</div></section>"; }
@@ -944,9 +948,11 @@ function libreName(it) { var c = CAT[it.k]; return c ? c.n : it.k === "autre" ? 
 function libreSheet(date) {
   var s = libreOf(date), id = seanceId(date, LIBRE), liste = s.liste || [], st;
   if (s.arret && s.arret.motif) st = '<span class="state warn">Terminée plus tôt</span>';
-  else st = hasData(s) ? '<span class="state done">Notée</span>' : '<span class="state alt">Hors salle</span>';
+  else st = hasData(s) ? '<span class="state done">Notée</span>' : s.lieu === "club" ? '<span class="state">À faire</span>' : '<span class="state alt">Hors salle</span>';
   var h = '<section class="sheet" id="libre"><div class="sheet-head"><div class="titled"><h2>Séance libre</h2><span class="small muted">' + esc(libreSub(s)) + "</span></div>" + st + "</div>";
   h += '<div><button type="button" class="linkbtn" data-act="libreedit">Modifier le lieu ou la séance remplacée</button></div>';
+  valuesOf(D.seances).forEach(function (o) { if (o.date === date && o.change && o.change.t === LIBRE) h += chgNote(date, o.type, o, seanceId(date, o.type)); });
+  if (s.remplace && s.zr) h += libreCompteNote(date, s);
   if (s.arret && s.arret.motif) h += '<div class="note warn"><b>Séance terminée plus tôt</b> (' + esc(motifLabel(MOTIFS_ARRET, s.arret.motif)) + ").</div>";
   h += checkin(s, id);
   h += '<div class="hr"></div><div class="section"><h3>Exercices</h3><p class="small muted">Ajoute les exercices dans l\'ordre où tu les fais. Pour chaque série : charge, reps faites et RIR ressenti (répétitions que tu aurais encore pu faire).</p>' +
@@ -1011,7 +1017,7 @@ function libreDialog(date, preT) {
       h += '<div class="scale"><div class="scale-q"><span>' + (one ? "Et la séance prévue, " + esc(shortName(cands[0])) + " ?" : "Et les séances prévues ?") + '</span></div><div class="seg stack" role="group">';
       cands.forEach(function (t) { h += '<button type="button" data-sh="remp" data-v="' + esc(t) + '" aria-pressed="' + (st.remplace === t) + '">' + (one ? "Remplacée par cette séance libre" : "Remplace " + esc(shortName(t))) + "</button>"; });
       h += '<button type="button" data-sh="remp" data-v="" aria-pressed="' + (st.remplace === "") + '">' + (one ? "Je la ferai un autre jour" : "Aucune, je les ferai un autre jour") + "</button></div>";
-      h += '<p class="small muted">' + (st.remplace ? esc(shortName(st.remplace)) + " comptera comme faite cette semaine. La suite du programme ne change pas." : "La séance prévue reste à faire : tu pourras l'ajouter un autre jour avec «\u00a0Ajouter une séance\u00a0».") + "</p></div>";
+      h += '<p class="small muted">' + (st.remplace ? (function () { var zt = zoneTxt(profOf(st.remplace, P && inBlock(date) ? weekOf(date) : 1)); return zt ? esc(shortName(st.remplace)) + " comptera comme faite cette semaine si tu y travailles surtout " + zt + ". La suite du programme ne change pas." : esc(shortName(st.remplace)) + " ne comptera comme faite que si tu le demandes : ce n'est pas le même type de séance."; })() : "La séance prévue reste à faire : tu pourras l'ajouter un autre jour avec «\u00a0Ajouter une séance\u00a0».") + "</p></div>";
     }
     h += '<div class="row"><button type="button" class="btn primary grow" data-sh="ok">' + (cur ? "Enregistrer" : "Commencer") + '</button><button type="button" class="btn quiet" data-sh="cancel">Annuler</button></div>';
     if (cur) h += '<div><button type="button" class="btn small quiet danger" data-sh="del">Supprimer cette séance libre</button></div>';
@@ -1028,6 +1034,7 @@ function libreDialog(date, preT) {
     else if (a === "ok") {
       close();
       var s = seance(date, LIBRE, true); s.libre = true; s.lieu = st.lieu;
+      if (st.remplace && (!cur || cur.remplace !== st.remplace)) { s.zr = 1; delete s.compte; }
       if (st.remplace) s.remplace = st.remplace; else delete s.remplace;
       if (!s.liste) s.liste = [];
       persist(); render();
@@ -1779,10 +1786,10 @@ function viewSemaine() {
     var d = addDays(mon, i), label, done = dayDone(d);
     if (inBlock(d)) {
       var types = plannedFor(d), lib = libreOf(d), skip = valuesOf(D.seances).filter(function (x) { return x.date === d && isSkipped(x); }).map(function (x) { return x.type; });
-      types = types && types.filter(function (t) { return skip.indexOf(t) < 0; });
+      types = types && types.filter(function (t) { var cx = seance(d, t); return skip.indexOf(t) < 0 && !(cx && cx.change && cx.smod); });
       var names = (types || []).map(function (t) { return isReplaced(d, t) ? "Séance libre" : shortName(t); });
       if (lib && !(types || []).some(function (t) { return isReplaced(d, t); })) names.push("Séance libre");
-      valuesOf(D.seances).forEach(function (x) { if (x.date === d && x.type !== LIBRE && !isCardioType(x.type) && realData(x) && (types || []).indexOf(x.type) < 0 && sessionDef(x.type)) names.push(shortName(x.type)); });
+      valuesOf(D.seances).forEach(function (x) { if (x.date === d && x.type !== LIBRE && !isCardioType(x.type) && realData(x) && !(x.change && x.smod) && (types || []).indexOf(x.type) < 0 && sessionDef(x.type)) names.push(shortName(x.type)); });
       if (names.length > 1) names = names.filter(function (n) { return n !== shortName("REPOS"); });
       cardioOf(d).forEach(function (s) { names.push(cardioTitle(s)); });
       var ahead = autoOn() || d < todayStr() ? [] : (plannedBase(d) || []).filter(function (t) { return doneAhead(d, t); });
@@ -3701,7 +3708,9 @@ function weekPlan(mon, nf) {
   var forced = {}, todayDone = start < 7 && start === days.indexOf(today) ? dayActual(today) : null;
   if (start < 7 && days[start] === today) {
     var pj = plj(today), ft = flexTypes()[0];
-    if (todayDone) forced[start] = { done: true, p: todayDone };
+    var chgT = pj.choix && pj.choix !== "REPOS" ? seance(today, pj.choix) : null;
+    if (chgT && chgT.pour && !hasData(chgT)) forced[start] = { t: pj.choix };
+    else if (todayDone) forced[start] = { done: true, p: todayDone };
     else if (pj.choix) forced[start] = pj.choix === "REPOS" ? { rest: true } : { t: pj.choix };
     else if (pj.sambo === "oui" && ft) forced[start] = { t: ft };
     else if (pj.sambo === "non" || nf) forced[start] = { noflex: true };
@@ -3834,7 +3843,7 @@ function autoTodayNote(date, types) {
       '<div class="row"><button type="button" class="btn" data-act="hiernote" data-date="' + y + '">Je la note</button><button type="button" class="btn" data-act="hiersaute" data-date="' + y + '" data-t="' + esc(yp.propose) + '">Sautée</button></div><p class="tiny muted">« Sautée » : hier compte comme un jour de repos.</p></section>';
   var lastSkip = seance(y, yp.propose || "") || null;
   if (lastSkip && lastSkip.smod && lastSkip.smod.statut === "saute" && !dayActual(y) && !dayActual(date)) h += '<div class="note info"><b>Hier compte comme repos.</b> Tu peux t\'entraîner aujourd\'hui.</div>';
-  if (t && t !== "__done" && !doneTypes(date).length) {
+  if (t && t !== "__done" && !doneTypes(date).length && !isReplaced(date, t) && !(seance(date, t) && seance(date, t).pour)) {
     var flexT = flexTypes()[0], isFlex = t === flexT, why = isFlex ? "" : whyToday(date, t);
     var label = pj.choix ? "Choisie par toi" + (pj.force ? ", malgré le conseil" : "") : (!isFlex && flexAsk(date) && !pj.sambo ? "Proposée si pas de " + esc((P.sessions[flexT] || {}).name || "sport").toLowerCase() : "Proposée aujourd'hui");
     h += '<div class="note info stack"><p><b>' + esc(shortName(t)) + " : " + label + ".</b>" + (why ? " Pourquoi : " + esc(why) : "") + '</p><div><button type="button" class="linkbtn" data-act="autreseance">Choisir une autre séance</button>' + (pj.choix ? ' <button type="button" class="linkbtn" data-act="autreraz">Revenir à la proposition</button>' : "") + "</div></div>";
@@ -4122,6 +4131,224 @@ function smodPretDialog(date, type, id) {
     var el = document.getElementById(s.smod.par.ref === LIBRE ? "libre" : "c-" + s.smod.par.ref); if (el) el.scrollIntoView({ block: "start" });
   }, true);
 }
+/* ================= Changer de séance en cours =================
+   Séance du jour déjà commencée : on passe à une autre séance du programme
+   ou à une séance libre. Les séries notées sont reprises ou effacées ;
+   l'ancien contenu est gardé pour pouvoir annuler le changement. */
+function rowsN(rows) { return valuesOf(rows || {}).filter(function (r) { return r && (toNum(r.r) || toNum(r.t)); }).length; }
+function rowsTxt(rows) {
+  var g = [];
+  valuesOf(rows || {}).forEach(function (r) {
+    if (!r || !(toNum(r.r) || toNum(r.t))) return;
+    var c = toNum(r.c), k = c === null ? "" : fmt(c) + " kg", v = toNum(r.r) || toNum(r.t), last = g[g.length - 1];
+    if (last && last.k === k) last.r.push(fmt(v)); else g.push({ k: k, r: [fmt(v)] });
+  });
+  return g.map(function (x) { return (x.k ? x.k + " × " : "") + x.r.join(", "); }).join(" ; ");
+}
+function chgDef(date, type, s) {
+  var other = !!(s.programme && (!P || s.programme !== P.id));
+  return (other && defOf(s)) || sessionDef(type) || defOf(s);
+}
+/* Exercices déjà notés dans la séance commencée */
+function chgItems(date, type, s) {
+  var def = chgDef(date, type, s), w = s.semaine || (P && inBlock(date) ? weekOf(date) : 1), out = [];
+  if (!def || def.kind !== "muscu") return out;
+  var list = s.plan ? s.plan.ex.map(function (x) { return { e: x, p: x.p }; }) : (def.ex || []).map(function (e) { return { e: e, p: presc(e, w) }; });
+  list.forEach(function (it) {
+    var e = it.e, p = it.p, rows = s.sets && s.sets[e.id], cible = p ? p.sets + " × " + p.reps : "";
+    if (rowsN(rows)) out.push({ k: exCat(e), nom: e.name, mu: e.mu || (CAT[exCat(e)] || {}).mu || null, rows: rows, cible: cible });
+    var rp = s.remp && s.remp[e.id];
+    if (rp && rowsN(rp.sets)) { var rk = rempCat(rp); out.push({ k: rk, nom: rk && CAT[rk] ? CAT[rk].n : rp.nom || e.name, mu: (rk && CAT[rk] ? CAT[rk].mu : null) || e.mu || null, rows: rp.sets, cible: cible }); }
+  });
+  return out;
+}
+function chgCount(s) {
+  var n = 0; valuesOf(s.sets || {}).forEach(function (r) { n += rowsN(r); }); valuesOf(s.remp || {}).forEach(function (r) { n += rowsN(r && r.sets); });
+  return n;
+}
+function canChange(date, type, def, s) {
+  return date === todayStr() && !!s && hasData(s) && !(s.smod && s.smod.statut) && !s.pour && !s.change && smodKind(date, type, def, s) === "both" && (def.kind === "muscu" || def.kind === "course" || def.kind === "sport");
+}
+function chgLine(date, type, s, id) {
+  var n = chgCount(s);
+  return '<p class="small muted chg-line">' + (n ? n + (n > 1 ? " séries notées." : " série notée.") : "Séance commencée.") + ' <button type="button" class="linkbtn" data-act="chgopen" data-id="' + esc(id) + '">Changer de séance</button></p>';
+}
+function zoneTxt(p) { return p.haut && p.bas ? "le haut et le bas du corps" : p.haut ? "le haut du corps" : p.bas ? "le bas du corps" : ""; }
+function demainTxt(z) {
+  if (!z) return "";
+  if (z.haut && z.bas) return "Demain, ni haut ni bas du corps, ni fractionné : il faut 48 h entre deux séances des mêmes muscles.";
+  if (z.haut) return "Demain, pas de séance du haut du corps : il faut 48 h entre deux.";
+  if (z.bas) return "Demain, ni bas du corps ni fractionné.";
+  return "";
+}
+/* Une séance libre faite à la place d'une séance prévue compte comme elle
+   si elle travaille surtout la même partie du corps (séries notées). */
+function libreZones(L) { return zonesOf((L.liste || []).map(function (it) { var c = CAT[it.k]; return { mu: c ? c.mu : null, n: 1 }; })); }
+function libreCompte(L, t, date) {
+  var w = P && inBlock(date) ? weekOf(date) : 1, prof = profDef(t, sessionDef(t), w), hs = 0, bs = 0, tot = 0;
+  (L.liste || []).forEach(function (it) {
+    var n = rowsN(L.sets && L.sets[it.u]); if (!n) return;
+    var c = CAT[it.k], mu = c ? c.mu : it.mu ? (function () { var o = {}; o[it.mu] = 1; return o; })() : {}, h = 0, b = 0;
+    keysOf(mu || {}).forEach(function (k) { if (HAUT_M[k]) h += mu[k]; else if (BAS_M[k]) b += mu[k]; });
+    tot += n; if (h > b) hs += n; else if (b > h) bs += n;
+  });
+  var auto = null;
+  if (tot) auto = prof.haut && prof.bas ? hs + bs > 0 && Math.min(hs, bs) >= 0.3 * (hs + bs) : prof.haut ? hs > bs : prof.bas ? bs > hs : false;
+  var compte = L.compte === true || L.compte === false ? L.compte : !!auto;
+  return { prof: prof, hs: hs, bs: bs, tot: tot, auto: auto, compte: compte, force: (L.compte === true || L.compte === false) && L.compte !== !!auto };
+}
+function seriesTxt(r) {
+  function one(n, z) { return n + (n > 1 ? " séries sur " : " série sur ") + r.tot + (n > 1 ? " travaillent " : " travaille ") + z; }
+  if (r.prof.haut && r.prof.bas) return one(r.hs, "le haut du corps") + ", " + r.bs + " le bas";
+  if (r.hs >= r.bs && r.hs) return one(r.hs, "le haut du corps") + (r.bs ? ", " + r.bs + " le bas" : "");
+  if (r.bs) return one(r.bs, "le bas du corps") + (r.hs ? ", " + r.hs + " le haut" : "");
+  return "Aucune des " + r.tot + " séries ne travaille surtout le haut ou le bas du corps";
+}
+function libreCompteNote(date, L) {
+  var t = L.remplace, nm = shortName(t), r = libreCompte(L, t, date), z = libreZones(L), dem = demainTxt(z), zt = zoneTxt(r.prof);
+  function link(v, lab) { return '<div><button type="button" class="linkbtn" data-act="librecpt" data-v="' + v + '">' + esc(lab) + "</button></div>"; }
+  if (!r.tot && !r.force) {
+    if (!zt) return '<div class="note info stack"><p><b>Ne compte pas comme ' + esc(nm) + ".</b> Une séance libre de musculation ne remplace pas ce type de séance : " + esc(nm) + " reste à faire cette semaine.</p>" + link("1", "La compter quand même comme " + nm) + "</div>";
+    return '<div class="note info"><b>Peut compter comme ' + esc(nm) + ".</b> Si tu y travailles surtout " + zt + ", " + esc(nm) + " sera faite pour la semaine. Pour la récupération, elle compte selon les muscles travaillés.</div>";
+  }
+  if (r.force && r.compte) return '<div class="note warn stack"><p><b>Comptée comme ' + esc(nm) + ", à ta demande.</b> " + (r.tot ? esc(seriesTxt(r)) + ". " : "") + esc(nm) + " est faite pour cette semaine. Pour la récupération, elle compte selon les muscles travaillés. " + esc(dem) + "</p>" + link("", "Laisser le carnet décider") + "</div>";
+  if (r.force) return '<div class="note info stack"><p><b>Pas comptée comme ' + esc(nm) + ", à ta demande.</b> " + esc(nm) + " reste à faire cette semaine. " + esc(dem) + "</p>" + link("", "Laisser le carnet décider") + "</div>";
+  if (r.compte) return '<div class="note ok stack"><p><b>Compte comme ' + esc(nm) + ".</b> " + esc(seriesTxt(r)) + " : " + esc(nm) + " est faite pour cette semaine. " + esc(dem) + "</p>" + link("0", "Ne pas la compter comme " + nm) + "</div>";
+  return '<div class="note warn stack"><p><b>Ne compte pas comme ' + esc(nm) + ".</b> " + esc(seriesTxt(r)) + " : elle ne remplace pas " + esc(nm) + ", qui reste à faire cette semaine. Pour la récupération, elle compte selon les muscles travaillés. " + esc(dem) + "</p>" + link("1", "La compter quand même comme " + nm) + "</div>";
+}
+/* Note sur la séance de départ, ou sur la séance libre, après le changement */
+function chgNote(date, type, s, id) {
+  var c = s.change, nm = shortName(type), to = c.t === LIBRE ? "séance libre" : shortName(c.t), h = "<b>Séance changée : " + esc(to) + " à la place de " + esc(nm) + ".</b> ";
+  if (c.t !== LIBRE) h += autoOn() ? esc(nm) + " n'est pas comptée aujourd'hui : le carnet la replace plus tard dans la semaine, si elle rentre. " : esc(nm) + " compte comme remplacée dans ta semaine. ";
+  if (c.n) {
+    if (!c.garde) h += c.n > 1 ? "Les " + c.n + " séries notées sont effacées." : "La série notée est effacée.";
+    else if (c.t === LIBRE) h += c.n > 1 ? "Les " + c.n + " séries notées y sont reprises." : "La série notée y est reprise.";
+    else {
+      if (c.inT && c.inT.length) h += "Séries de " + esc(c.inT.join(", ")) + " reprises dans " + esc(to) + ". ";
+      if (c.inL && c.inL.length) h += "Séries de " + esc(c.inL.join(", ")) + " gardées dans une séance libre.";
+    }
+  }
+  return '<div class="note info stack"><p>' + h + '</p><div><button type="button" class="linkbtn" data-act="chgundo" data-id="' + esc(id) + '">Annuler le changement</button></div></div>';
+}
+function chgAdvice(date, t) {
+  var w = P && inBlock(date) ? weekOf(date) : 1, r = pairRule(dayActual(addDays(date, -1)), profOf(t, w));
+  return r && r.c >= 3 ? r.why : "";
+}
+function chgSheet(date, type) {
+  var s = seance(date, type), id = seanceId(date, type); if (!s) return;
+  var nm = shortName(type), items = chgItems(date, type, s), opts = smodProgOptions(date, type).map(function (o) { o.why = chgAdvice(date, o.t); o.info = (o.sub.split(" · ")[1] || ""); return o; });
+  var lib = libreOf(date), st = { t: null, garde: true };
+  function draw() {
+    var h = '<h2 id="dlg-t">Changer de séance</h2><p class="small muted">Tu as commencé ' + esc(nm) + ". Choisis la séance que tu fais à la place.</p><div class=\"pick-list\">";
+    opts.forEach(function (o) {
+      h += '<button type="button" class="pick' + (o.why ? " warn" : "") + (st.t === o.t ? " sel" : "") + '" data-sh="t" data-v="' + esc(o.t) + '" aria-pressed="' + (st.t === o.t) + '"><span><b>' + esc(o.label) + '</b><span class="small">' + esc((o.why ? "Déconseillée aujourd'hui : " + o.why + "." : "Possible aujourd'hui.") + (o.info ? " " + o.info.charAt(0).toUpperCase() + o.info.slice(1) + "." : "")) + '</span></span><span class="chev" aria-hidden="true">›</span></button>';
+    });
+    h += '<button type="button" class="pick' + (st.t === LIBRE ? " sel" : "") + '" data-sh="t" data-v="' + LIBRE + '" aria-pressed="' + (st.t === LIBRE) + '"><span><b>Séance libre</b><span class="small">' + (lib ? "Tu continues la séance libre d'aujourd'hui." : "Tu composes avec le matériel que tu as.") + '</span></span><span class="chev" aria-hidden="true">›</span></button></div>';
+    if (st.t) {
+      var o = opts.filter(function (x) { return x.t === st.t; })[0], to = st.t === LIBRE ? "la séance libre" : shortName(st.t);
+      if (st.t === LIBRE) {
+        var zt = zoneTxt(profOf(type, P && inBlock(date) ? weekOf(date) : 1));
+        h += zt ? '<div class="note info"><b>Elle peut compter comme ' + esc(nm) + ".</b> Si tu y travailles surtout " + zt + ", " + esc(nm) + " est faite pour la semaine. Pour la récupération, elle compte selon les muscles travaillés.</div>"
+          : '<div class="note info">Elle ne compte pas comme ' + esc(nm) + " : " + esc(nm) + " reste à faire cette semaine. Pour la récupération, elle compte selon les muscles travaillés.</div>";
+      }
+      if (o && o.why) h += '<div class="note warn">Déconseillée aujourd\'hui : ' + esc(o.why) + ". C'est ton choix : tu peux passer à " + esc(to) + " quand même.</div>";
+      if (items.length) {
+        var tdef = st.t !== LIBRE ? sessionDef(st.t) : null, tk = {}, n = 0;
+        if (tdef) (tdef.ex || []).forEach(function (e) { var k = exCat(e); if (k) tk[k] = true; });
+        items.forEach(function (it) { n += rowsN(it.rows); });
+        var lines = items.map(function (it) { return esc(CAT[it.k] ? CAT[it.k].n : it.nom) + ", " + esc(rowsTxt(it.rows)) + (tdef ? (it.k && tk[it.k] ? " : dans " + esc(to) : " : dans une séance libre") : ""); }).join("<br>");
+        h += "<h3>" + (n > 1 ? "Les " + n + " séries déjà notées" : "La série déjà notée") + '</h3><div role="radiogroup">';
+        h += '<button type="button" class="opt" role="radio" data-sh="garde" data-v="1" aria-checked="' + st.garde + '"><span class="radio" aria-hidden="true"></span><span><b>' + (st.t === LIBRE ? "Les reprendre dans la séance libre" : "Les garder") + '</b><span class="small muted">' + lines + (st.t === LIBRE ? "<br>Tu continues à partir de là." : "<br>Elles restent dans ton historique et tes progrès ; " + esc(nm) + " n'est pas comptée comme faite.") + "</span></span></button>";
+        h += '<button type="button" class="opt" role="radio" data-sh="garde" data-v="0" aria-checked="' + !st.garde + '"><span class="radio" aria-hidden="true"></span><span><b>Les effacer</b><span class="small muted">Comme si tu n\'avais pas commencé ' + esc(nm) + ".</span></span></button></div>";
+      } else h += '<p class="small muted">Ce que tu as noté pour ' + esc(nm) + " sera mis de côté : tu peux annuler le changement tant que la journée n'est pas finie.</p>";
+      h += '<div class="row"><button type="button" class="btn primary grow" data-sh="go">Passer à ' + esc(to) + (o && o.why ? " quand même" : "") + '</button><button type="button" class="btn quiet" data-sh="cancel">Annuler</button></div>';
+    } else h += '<div><button type="button" class="btn wide" data-sh="cancel">Annuler</button></div>';
+    return h;
+  }
+  openSheet(draw(), function (b, close, back) {
+    var a = b.dataset.sh;
+    if (a === "cancel") { close(); return; }
+    if (a === "t" || a === "garde") {
+      if (a === "t") st.t = b.dataset.v; else st.garde = b.dataset.v === "1";
+      var dl = back.querySelector(".dialog"), sc = dl.scrollTop; dl.innerHTML = draw(); dl.scrollTop = sc;
+      var f = back.querySelector('[data-sh="' + a + '"][data-v="' + b.dataset.v + '"]'); if (f) f.focus();
+      return;
+    }
+    if (a === "go" && st.t) {
+      var o = opts.filter(function (x) { return x.t === st.t; })[0];
+      close(); chgApply(date, type, st.t, st.garde && items.length > 0, o);
+    }
+  }, true);
+}
+function chgApply(date, type, T, garde, o) {
+  var s = seance(date, type), id = seanceId(date, type), items = chgItems(date, type, s), c = { t: T, garde: garde, avant: {}, n: 0, u: [], copies: [], inT: [], inL: [] };
+  items.forEach(function (it) { c.n += rowsN(it.rows); });
+  keysOf(s).forEach(function (k) { if (NOT_DATA.indexOf(k) < 0 && k !== "smod") { c.avant[k] = JSON.parse(JSON.stringify(s[k])); delete s[k]; } });
+  var L = libreOf(date);
+  function libre() {
+    if (!L) { L = seance(date, LIBRE, true); L.libre = true; L.lieu = "club"; L.liste = []; L.nU = 0; c.libNew = true; }
+    if (!L.liste) L.liste = [];
+    return L;
+  }
+  function toLibre(it) {
+    var l = libre(); l.nU = (l.nU || 0) + 1; var u = "lx" + l.nU, x = { u: u, k: it.k && CAT[it.k] ? it.k : "autre" };
+    if (x.k === "autre") { x.nom = it.nom; var mk = keysOf(it.mu || {})[0]; if (mk) x.mu = mk; }
+    if (it.cible) x.cible = it.cible;
+    l.liste.push(x); l.sets = l.sets || {}; l.sets[u] = JSON.parse(JSON.stringify(it.rows)); c.u.push(u);
+    var ln = CAT[x.k] ? CAT[x.k].n : it.nom; if (c.inL.indexOf(ln) < 0) c.inL.push(ln);
+  }
+  if (T === LIBRE) {
+    libre(); c.libRemp = L.remplace || null; c.libZr = !!L.zr; c.libCompte = L.compte;
+    L.remplace = type; L.zr = 1; delete L.compte;
+    if (garde) items.forEach(toLibre);
+    if (!L.checkin && s.checkin) { L.checkin = JSON.parse(JSON.stringify(s.checkin)); c.ckL = true; }
+  } else {
+    var x = seance(date, T, true), tdef = sessionDef(T), used = {};
+    x.ajoutee = true; x.pour = type;
+    if (!x.checkin && s.checkin) x.checkin = JSON.parse(JSON.stringify(s.checkin));
+    s.smod = { statut: "remplace", par: { k: "prog", t: T, started: true } };
+    if (o && o.later && !autoOn()) { D.avances = D.avances || {}; D.avances[o.later + "_" + T] = date; s.smod.par.from = o.later; x.avanceDe = o.later; c.av = o.later + "_" + T; }
+    if (autoOn()) { var pj = plj(date, true); c.pj = { choix: pj.choix, force: pj.force }; pj.choix = T; if (o && o.why) pj.force = true; else delete pj.force; }
+    if (garde) items.forEach(function (it) {
+      var te = it.k ? (tdef.ex || []).filter(function (e) { return exCat(e) === it.k && !used[e.id]; })[0] : null;
+      if (te) { used[te.id] = true; x.sets = x.sets || {}; x.sets[te.id] = JSON.parse(JSON.stringify(it.rows)); c.copies.push(te.id); c.inT.push(te.name); }
+      else toLibre(it);
+    });
+  }
+  s.change = c;
+  persist(); render();
+  var el = document.getElementById(T === LIBRE ? "libre" : "sess-" + seanceId(date, T)); if (el) el.scrollIntoView({ block: "start" });
+  toast(T === LIBRE ? "Séance libre à la place de " + shortName(type) + "." : shortName(T) + " à la place de " + shortName(type) + ".");
+}
+function chgUndo(id) {
+  var s = D.seances[id]; if (!s || !s.change) return;
+  var us = id.lastIndexOf("_"), date = id.slice(0, us), type = id.slice(us + 1), c = s.change, L = libreOf(date), extra = [];
+  function rest(doc, drop) { var x = JSON.parse(JSON.stringify(doc)); (drop || []).forEach(function (k) { if (x.sets) delete x.sets[k]; }); if (x.sets && !keysOf(x.sets).length) delete x.sets; return hasData(x); }
+  var X = c.t !== LIBRE ? seance(date, c.t) : null;
+  if (X && rest(X, c.copies)) extra.push(shortName(c.t));
+  if (L && c.libNew && rest(L, c.u)) extra.push("la séance libre");
+  function run() {
+    if (c.t !== LIBRE) {
+      delete D.seances[seanceId(date, c.t)];
+      if (c.av && D.avances) delete D.avances[c.av];
+      if (c.pj) { var pj = plj(date, true); if (c.pj.choix) pj.choix = c.pj.choix; else delete pj.choix; if (c.pj.force) pj.force = c.pj.force; else delete pj.force; }
+      delete s.smod;
+    }
+    if (L) {
+      if (c.libNew) delete D.seances[seanceId(date, LIBRE)];
+      else {
+        L.liste = (L.liste || []).filter(function (it) { return c.u.indexOf(it.u) < 0; }); c.u.forEach(function (u) { if (L.sets) delete L.sets[u]; });
+        if (c.t === LIBRE) { if (c.libRemp) L.remplace = c.libRemp; else delete L.remplace; if (!c.libZr) delete L.zr; if (c.libCompte === true || c.libCompte === false) L.compte = c.libCompte; else delete L.compte; if (c.ckL) delete L.checkin; }
+      }
+    }
+    keysOf(c.avant).forEach(function (k) { s[k] = c.avant[k]; });
+    delete s.change;
+    persist(); render(); toast("Changement annulé : retour à " + shortName(type) + ".");
+    var el = document.getElementById("sess-" + id); if (el) el.scrollIntoView({ block: "start" });
+  }
+  if (extra.length) dialog("Annuler le changement ?", '<p class="small">Ce que tu as noté dans ' + esc(extra.join(" et ")) + " depuis le changement sera effacé. Tu retrouves " + esc(shortName(type)) + " comme avant.</p>", [{ label: "Annuler le changement", cls: "danger", run: run }, { label: "Garder", cls: "primary" }]);
+  else run();
+}
 function smodAct(b) {
   var id = b.dataset.id, s = D.seances[id] || null, a = b.dataset.act, us = id.lastIndexOf("_"), date = id.slice(0, us), type = id.slice(us + 1);
   if (a === "smodopen") { S.smodOpen = S.smodOpen || {}; S.smodOpen[id] = true; render(); var p = document.querySelector('[data-smod="' + id + '"]'); if (p) p.scrollIntoView({ block: "nearest" }); return; }
@@ -4153,7 +4380,7 @@ function claudeSheet(where) {
 }
 function summarize(s) {
   var def = sessionDef(s.type), isLib = s.type === LIBRE, ci = cardioInfo(s), cNew = ci && !ci.legacy && !ci.test;
-  var parts = [fmtShort(s.date) + " " + (isLib ? "séance libre hors salle (" + lieuLabel(s.lieu).toLowerCase() + (s.remplace ? ", remplace " + shortName(s.remplace) : "") + ")" : ci && ci.free ? cardioTitle(s).toLowerCase() : cNew ? (def ? def.short || def.name : "course") + (ci.ctype ? " (" + listLabel(CTYPES, ci.ctype).toLowerCase() + ")" : "") : s.plan ? s.plan.short : def ? def.short || def.name : s.type)];
+  var parts = [fmtShort(s.date) + " " + (isLib ? "séance libre (" + lieuLabel(s.lieu).toLowerCase() + (s.remplace ? ", remplace " + shortName(s.remplace) : "") + ")" : ci && ci.free ? cardioTitle(s).toLowerCase() : cNew ? (def ? def.short || def.name : "course") + (ci.ctype ? " (" + listLabel(CTYPES, ci.ctype).toLowerCase() + ")" : "") : s.plan ? s.plan.short : def ? def.short || def.name : s.type)];
   if (cNew) { var cs = cardioSummary(s, ci); if (cs) parts.push(cs); }
   var r = readiness(s.checkin); if (r) parts.push("forme " + fmt(r.avg, 1) + "/5 (" + CHECK.map(function (q) { return q.k + " " + s.checkin[q.k]; }).join(", ") + ")");
   if (isLib) (s.liste || []).forEach(function (it) {
@@ -4188,12 +4415,12 @@ function planText(date) {
   var out = types.map(function (t) {
     var def = P.sessions[t];
     if (!def) return t;
-    if (isReplaced(date, t)) return def.name + " : remplacée aujourd'hui par une séance libre hors salle (" + lieuLabel(lib.lieu).toLowerCase() + ").";
+    if (isReplaced(date, t)) return def.name + " : remplacée aujourd'hui par une séance libre (" + lieuLabel(lib.lieu).toLowerCase() + ").";
     if (def.kind === "muscu") return def.name + " :\n" + def.ex.map(function (e) { var p = presc(e, w); if (!p) return null; var sg = suggestion(e, p, date); return "  " + e.id + " " + e.name + " : " + p.sets + "×" + p.reps + (p.load ? ", " + p.load : "") + ", RIR " + p.rir + (sg ? " (charge conseillée " + loadLabel(e, sg.load) + ")" : ""); }).filter(Boolean).join("\n");
     if (def.kind === "course") { var cp = def.plan[w - 1] || def.plan[def.plan.length - 1], fl = cp.fr ? fmtLine(cp.fr) : ""; return def.name + " : " + cp.texte + (fl ? " (format : " + fl + (cp.fr.viseTxt ? ", visé " + cp.fr.viseTxt + " par répétition" : "") + ")" : ""); }
     return def.name;
   });
-  if (lib && !types.some(function (t) { return isReplaced(date, t); })) out.push("Séance libre hors salle en plus (" + lieuLabel(lib.lieu).toLowerCase() + ").");
+  if (lib && !types.some(function (t) { return isReplaced(date, t); })) out.push("Séance libre en plus (" + lieuLabel(lib.lieu).toLowerCase() + ").");
   cardioOf(date).forEach(function (s) { out.push("Activité ajoutée : " + cardioTitle(s).toLowerCase() + "."); });
   return out.join("\n") || "Rien de prévu.";
 }
@@ -4655,6 +4882,9 @@ function onAct(ev) {
     case "arretopen": doc = docFor("seances", b.dataset.id); doc.arret = { ouvert: true }; persist(); render(); break;
     case "arretclose": doc = docFor("seances", b.dataset.id); delete doc.arret; persist(); render(); break;
     case "librestart": libreDialog(S.date, b.dataset.t); break;
+    case "chgopen": (function () { var cid = b.dataset.id, ci = cid.lastIndexOf("_"); chgSheet(cid.slice(0, ci), cid.slice(ci + 1)); })(); break;
+    case "chgundo": chgUndo(b.dataset.id); break;
+    case "librecpt": (function () { var L = libreOf(S.date); if (!L) return; var v = b.dataset.v; if (v === "") delete L.compte; else { L.compte = v === "1"; delete L.compte; var au = libreCompte(L, L.remplace, S.date).auto; if (!!au !== (v === "1")) L.compte = v === "1"; } persist(); render(); })(); break;
     case "cardiostart": cardioDialog(S.date, null); break;
     case "cardioedit": cardioDialog(S.date, b.dataset.id); break;
     case "fmtmode": doc = docFor("seances", b.dataset.id); setPath(doc, "fmt.mode", b.dataset.v); persist(); render(); break;
