@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.17.0";
+var APP_VERSION = "1.18.0";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -334,7 +334,7 @@ function plannedBase(date) {
   if (date === P.debut && P.sessions.MENSU && !P.cree) out.unshift("MENSU");
   return out;
 }
-var NOT_DATA = ["date", "type", "semaine", "programme", "checkin", "ajoutee", "maj", "libre", "lieu", "remplace", "liste", "nU", "cardio", "sport", "ctype", "fmt", "velMes", "nSer", "nRep", "legacy", "fplan", "ftexte", "fsport", "fctype", "fspec", "adapte", "alerteA", "pour", "avanceDe", "garderSeries", "modele", "chg", "stype", "change", "zr", "compte"];
+var NOT_DATA = ["date", "type", "semaine", "programme", "checkin", "ajoutee", "maj", "libre", "lieu", "remplace", "liste", "nU", "cardio", "sport", "ctype", "fmt", "velMes", "nSer", "nRep", "legacy", "fplan", "ftexte", "fsport", "fctype", "fspec", "adapte", "alerteA", "pour", "avanceDe", "garderSeries", "modele", "chg", "stype", "change", "zr", "compte", "lim"];
 function hasData(s) {
   if (!s) return false;
   return keysOf(s).some(function (k) { if (k === "smod") return !!(s.smod && s.smod.statut); return NOT_DATA.indexOf(k) < 0 && s[k] !== undefined && s[k] !== null && JSON.stringify(s[k]) !== "{}"; });
@@ -376,13 +376,16 @@ function bodyweight(date) {
   return P && P.poidsRef ? P.poidsRef : 75;
 }
 function rowsOk(obj) { return valuesOf(obj).filter(function (r) { return r && toNum(r.c) !== null && toNum(r.r); }); }
+/* Séance à charges limitées (matériel de la maison) : comptée dans le volume et la semaine,
+   pas dans la force ni pour les charges conseillées. */
+function forceOk(s) { return !(s && s.lim); }
 function lastPerf(exId, before) {
-  var list = valuesOf(D.seances).filter(function (s) { return s.date < before && s.sets && s.sets[exId]; }).sort(function (a, b) { return a.date < b.date ? 1 : -1; });
+  var list = valuesOf(D.seances).filter(function (s) { return s.date < before && s.sets && s.sets[exId] && forceOk(s); }).sort(function (a, b) { return a.date < b.date ? 1 : -1; });
   for (var i = 0; i < list.length; i++) { var rows = rowsOk(list[i].sets[exId]); if (rows.length) return { date: list[i].date, rows: rows }; }
   return null;
 }
 function lastRemp(nom, before) {
-  var list = valuesOf(D.seances).filter(function (s) { return s.date < before && s.remp; }).sort(function (a, b) { return a.date < b.date ? 1 : -1; });
+  var list = valuesOf(D.seances).filter(function (s) { return s.date < before && s.remp && forceOk(s); }).sort(function (a, b) { return a.date < b.date ? 1 : -1; });
   for (var i = 0; i < list.length; i++) {
     var ks = keysOf(list[i].remp);
     for (var j = 0; j < ks.length; j++) { var r = list[i].remp[ks[j]]; if (r && r.nom === nom && r.sets) { var rows = rowsOk(r.sets); if (rows.length) return { date: list[i].date, rows: rows }; } }
@@ -414,7 +417,7 @@ function suggestion(e, p, date) {
    plus, où la marge s'estime mieux (Larsen et al., PeerJ 2021). Alléger après 2 séances sous la cible : règle de
    pratique, sans étude qui fixe ce seuil. Toujours un conseil : l'athlète choisit. */
 function lastPerfs(exId, before, n) {
-  var out = [], list = valuesOf(D.seances).filter(function (s) { return s.date < before && s.sets && s.sets[exId]; }).sort(function (a, b) { return a.date < b.date ? 1 : -1; });
+  var out = [], list = valuesOf(D.seances).filter(function (s) { return s.date < before && s.sets && s.sets[exId] && forceOk(s); }).sort(function (a, b) { return a.date < b.date ? 1 : -1; });
   for (var i = 0; i < list.length && out.length < n; i++) { var rows = rowsOk(list[i].sets[exId]); if (rows.length) out.push({ date: list[i].date, rows: rows }); }
   return out;
 }
@@ -748,6 +751,7 @@ function bodyMuscu(date, def, w, s, id) {
   if (ld) h += '<div class="note info stack"><p><b>' + esc(ld.name) + " très dur hier.</b> " + esc(ld.texte || "Règle de ton programme : une série de moins par exercice, mêmes charges.") + '</p><div><button type="button" class="linkbtn" data-act="toggle" data-col="seances" data-id="' + esc(id) + '" data-path="garderSeries">Garder toutes les séries</button></div></div>';
   else if (ldOff) h += '<div class="note info stack"><p>Toutes les séries gardées malgré la séance très dure d\'hier.</p><div><button type="button" class="linkbtn" data-act="toggle" data-col="seances" data-id="' + esc(id) + '" data-path="garderSeries">Appliquer la règle : une série de moins</button></div></div>';
   h += checkin(s, id);
+  h += '<div class="section">' + limBox(s, id, true) + "</div>";
   var r = readiness(s.checkin), light = r && r.level === "stop";
   h += '<div class="hr"></div><div class="section"><h3>Exercices</h3><p class="small muted">Note pour chaque série la charge, les répétitions faites et ton RIR ressenti (répétitions que tu aurais encore pu faire). « = prévu » remplit la série avec la cible.</p></div>';
   var items = s.plan ? s.plan.ex.map(function (x) { return { e: x, p: x.p }; }) : def.ex.map(function (e) { return { e: e, p: presc(e, w) }; });
@@ -762,6 +766,7 @@ function bodyMuscu(date, def, w, s, id) {
       (p.load ? '<div class="stat"><b>' + esc(p.load) + '</b><span>charge prévue</span></div>' : "") +
       '<div class="stat"><b>' + esc(light || ad.facile ? fmt(rirT) : p.rir) + '</b><span>RIR visé</span></div>' +
       '<div class="stat"><b>' + esc(p.rest || e.rest) + '</b><span>repos</span></div></div>';
+    if (s.lim && p.load && !e.bw && !e.time && !has) h += '<p class="small muted">Charge prévue pas possible aujourd\'hui ? Prends la plus lourde que tu as et fais plus de répétitions, au même RIR.</p>';
     var ech = e.ech && echelleOf(exCat(e));
     if (!mod && ech) {
       h += '<p class="advice">Au poids du corps, sans lest : vise le haut de la fourchette au RIR visé.</p>';
@@ -919,13 +924,13 @@ function catRows(s, k) {
 }
 function byDateDesc(a, b) { return a.date < b.date ? 1 : -1; }
 function lastCat(k, before) {
-  var list = valuesOf(D.seances).filter(function (s) { return s.date < before; }).sort(byDateDesc);
+  var list = valuesOf(D.seances).filter(function (s) { return s.date < before && forceOk(s); }).sort(byDateDesc);
   for (var i = 0; i < list.length; i++) { var rows = catRows(list[i], k); if (rows.length) return { date: list[i].date, rows: rows, best: bestRow(CAT[k], rows), salle: list[i].type !== LIBRE }; }
   return null;
 }
 function lastAutre(nom, before) {
   var key = String(nom).trim().toLowerCase();
-  var list = valuesOf(D.seances).filter(function (s) { return s.date < before && s.type === LIBRE; }).sort(byDateDesc);
+  var list = valuesOf(D.seances).filter(function (s) { return s.date < before && s.type === LIBRE && forceOk(s); }).sort(byDateDesc);
   for (var i = 0; i < list.length; i++) {
     var s = list[i], rows = [];
     (s.liste || []).forEach(function (it) { if (it.k === "autre" && String(it.nom || "").trim().toLowerCase() === key && s.sets && s.sets[it.u]) rows = rows.concat(rowsOk(s.sets[it.u])); });
@@ -945,6 +950,11 @@ function volText(mon) {
   return MUSCLES.map(function (m) { return m[1].toLowerCase() + " " + fmt(d.m[m[0]]) + (p ? "/" + fmt(p.m[m[0]]) : ""); }).join(", ");
 }
 function libreName(it) { var c = CAT[it.k]; return c ? c.n : it.k === "autre" ? (it.nom || "Autre exercice") : "Exercice"; }
+function limBox(s, id, prog) {
+  return '<button type="button" role="checkbox" aria-checked="' + !!s.lim + '" class="chk-item lim-box" data-act="toggle" data-col="seances" data-id="' + esc(id) + '" data-path="lim"><span class="box" aria-hidden="true"></span><span class="grow"><b>' + (prog ? "Charges limitées aujourd'hui" : "Charges limitées") + '</b><span class="small muted">' +
+    (prog ? "Sans ton matériel habituel : la séance compte comme faite, mais pas dans tes courbes de force, tes bilans de force ni pour les charges conseillées des prochaines séances."
+      : "Matériel de la maison : la séance ne compte pas dans tes courbes de force ni pour les charges conseillées à la salle. Le volume, la semaine et la récupération comptent normalement.") + "</span></span></button>";
+}
 function libreSheet(date) {
   var s = libreOf(date), id = seanceId(date, LIBRE), liste = s.liste || [], st;
   if (s.arret && s.arret.motif) st = '<span class="state warn">Terminée plus tôt</span>';
@@ -953,6 +963,7 @@ function libreSheet(date) {
   h += '<div><button type="button" class="linkbtn" data-act="libreedit">Modifier le lieu ou la séance remplacée</button></div>';
   valuesOf(D.seances).forEach(function (o) { if (o.date === date && o.change && o.change.t === LIBRE) h += chgNote(date, o.type, o, seanceId(date, o.type)); });
   if (s.remplace && s.zr) h += libreCompteNote(date, s);
+  h += limBox(s, id, false);
   if (s.arret && s.arret.motif) h += '<div class="note warn"><b>Séance terminée plus tôt</b> (' + esc(motifLabel(MOTIFS_ARRET, s.arret.motif)) + ").</div>";
   h += checkin(s, id);
   h += '<div class="hr"></div><div class="section"><h3>Exercices</h3><p class="small muted">Ajoute les exercices dans l\'ordre où tu les fais. Pour chaque série : charge, reps faites et RIR ressenti (répétitions que tu aurais encore pu faire).</p>' +
@@ -971,6 +982,7 @@ function libreEx(s, id, it, i, date) {
   var last = it.k === "autre" ? (it.nom ? lastAutre(it.nom, date) : null) : c ? lastCat(it.k, date) : null;
   h += '<p class="advice">' + (last ? "Dernière fois : " + esc(perfText(c, last.best)) + ' <span class="muted">(' + esc(fmtShort(last.date)) + (last.salle ? ", à la salle" : "") + ")</span>"
     : time ? "Première fois : note la durée tenue et la marge qu'il te restait." : "Première fois sur cet exercice : choisis une charge qui laisse 2 répétitions en réserve.") + "</p>";
+  if (s.lim && last && !time) h += '<p class="small muted">Avec tes charges du jour, vise le même RIR en faisant plus de répétitions ; ces séries ne changent pas tes charges de salle.</p>';
   if (it.cible) h += '<p class="small">Prévu : ' + esc(it.cible) + (it.consigne ? ". " + esc(it.consigne) : "") + "</p>";
   h += libreRows(id, it.u, rows, n, c, last);
   if (c && c.bw) h += '<p class="tiny muted">Poids de corps : mets 0 dans Lest. ' + (c.bwf ? (c.bwf >= 0.6 && c.bwf < 0.7 ? "Les deux tiers de ton poids du jour sont comptés" : "Environ " + Math.round(c.bwf * 100) + " % de ton poids du jour est compté") : "Ton poids du jour est compté") + " dans la force estimée.</p>";
@@ -1008,10 +1020,11 @@ function openSheet(html, onAct, tall) {
 }
 function libreDialog(date, preT) {
   var cur = libreOf(date), cands = libreCandidates(date);
-  var st = { lieu: cur ? cur.lieu || "maison" : "maison", remplace: cur ? cur.remplace || "" : (preT && cands.indexOf(preT) >= 0 ? preT : "") };
+  var st = { lieu: cur ? cur.lieu || "maison" : "maison", lim: cur ? !!cur.lim : true, remplace: cur ? cur.remplace || "" : (preT && cands.indexOf(preT) >= 0 ? preT : "") };
   function draw() {
     var h = '<h2 id="dlg-t">Séance libre</h2><p class="small muted">Pour t\'entraîner hors de ta salle. Tu ajoutes les exercices un par un, puis tu notes charge, reps et RIR comme d\'habitude.</p>';
     h += '<div class="scale"><div class="scale-q"><span>Où t\'entraînes-tu ?</span></div><div class="seg" role="group">' + LIEUX.map(function (o) { return '<button type="button" data-sh="lieu" data-v="' + o.v + '" aria-pressed="' + (st.lieu === o.v) + '">' + esc(o.l) + "</button>"; }).join("") + "</div></div>";
+    if (!cur || cur.lieu !== "club") h += '<button type="button" role="checkbox" aria-checked="' + st.lim + '" class="chk-item" data-sh="lim"><span class="box" aria-hidden="true"></span><span class="grow"><b>Charges limitées</b><span class="small muted">Matériel de la maison : la séance ne compte pas dans tes courbes de force ni pour les charges conseillées à la salle. Le volume, la semaine et la récupération comptent normalement.</span></span></button><p class="tiny muted">Cochée d\'office à la maison. Décoche-la si tu as le matériel pour forcer comme à la salle.</p>';
     if (cands.length) {
       var one = cands.length === 1;
       h += '<div class="scale"><div class="scale-q"><span>' + (one ? "Et la séance prévue, " + esc(shortName(cands[0])) + " ?" : "Et les séances prévues ?") + '</span></div><div class="seg stack" role="group">';
@@ -1026,14 +1039,16 @@ function libreDialog(date, preT) {
   function del() { delete D.seances[seanceId(date, LIBRE)]; persist(); render(); toast("Séance libre supprimée."); }
   openSheet(draw(), function (b, close, back) {
     var a = b.dataset.sh;
+    if (a === "lim") { st.lim = !st.lim; b.setAttribute("aria-checked", st.lim); return; }
     if (a === "lieu" || a === "remp") {
-      if (a === "lieu") st.lieu = b.dataset.v; else st.remplace = b.dataset.v;
+      if (a === "lieu") { st.lieu = b.dataset.v; st.lim = st.lieu === "maison"; } else st.remplace = b.dataset.v;
       back.querySelector(".dialog").innerHTML = draw();
       var again = back.querySelector('[data-sh="' + a + '"][data-v="' + b.dataset.v + '"]'); if (again) again.focus();
     } else if (a === "cancel") close();
     else if (a === "ok") {
       close();
       var s = seance(date, LIBRE, true); s.libre = true; s.lieu = st.lieu;
+      if (st.lieu !== "club") { if (st.lim) s.lim = true; else delete s.lim; }
       if (st.remplace && (!cur || cur.remplace !== st.remplace)) { s.zr = 1; delete s.compte; }
       if (st.remplace) s.remplace = st.remplace; else delete s.remplace;
       if (!s.liste) s.liste = [];
@@ -1044,7 +1059,7 @@ function libreDialog(date, preT) {
       if (hasData(cur)) dialog("Supprimer la séance libre ?", '<p class="small">Les séries et le bilan notés dans cette séance seront effacés.</p>', [{ label: "Supprimer", cls: "danger", run: del }, { label: "Annuler", cls: "primary" }]);
       else del();
     }
-  });
+  }, true);
 }
 /* Remplacement d'un exercice du programme : exercices de la bibliothèque qui travaillent directement
    le même muscle principal, en commençant par les remplacements cités par le programme. */
@@ -2002,7 +2017,7 @@ function curveIndex() {
     if (!prev || best > prev.y) c.byDate[s.date] = { x: s.date, y: best, hollow: hollow };
   }
   valuesOf(D.seances).forEach(function (s) {
-    if (!s.sets && !s.remp) return;
+    if ((!s.sets && !s.remp) || !forceOk(s)) return;
     if (s.type === LIBRE) {
       if (!s.sets) return;
       (s.liste || []).forEach(function (it) { var c = CAT[it.k]; if (c && !c.time && s.sets[it.u]) add("cat:" + it.k, c.n, CAT_ORDER[it.k], c.bw, c.bwf, s, rowsOk(s.sets[it.u]), true); });
@@ -4118,7 +4133,7 @@ function smodPretDialog(date, type, id) {
       var tp = MODELES[st.mat][b.dataset.org][Number(b.dataset.i)], cur = libreOf(date);
       if (cur && hasData(cur)) { close(); dialog("Une séance libre existe déjà", '<p class="small">Tu as déjà noté une séance libre aujourd\'hui. Ajoute les exercices dedans, ou choisis une séance de cardio.</p>', [{ label: "OK", cls: "primary" }]); return; }
       close();
-      var L = seance(date, LIBRE, true); L.libre = true; L.lieu = st.mat === "salle" ? "salle" : st.mat === "street" ? "dehors" : "maison"; L.modele = tp[0]; L.nU = 0; L.liste = [];
+      var L = seance(date, LIBRE, true); L.libre = true; L.lieu = st.mat === "salle" ? "salle" : st.mat === "street" ? "dehors" : "maison"; if (L.lieu === "maison") L.lim = true; L.modele = tp[0]; L.nU = 0; L.liste = [];
       tp[1].forEach(function (x) { L.nU++; var it = { u: "lx" + L.nU, k: x.k, cible: x.s + " × " + x.r }; if (x.note) it.consigne = x.note; L.liste.push(it); });
       s.smod.par = { k: "pret", nom: tp[0], ref: LIBRE };
     } else if (a === "ctype") {
@@ -4382,6 +4397,7 @@ function summarize(s) {
   var def = sessionDef(s.type), isLib = s.type === LIBRE, ci = cardioInfo(s), cNew = ci && !ci.legacy && !ci.test;
   var parts = [fmtShort(s.date) + " " + (isLib ? "séance libre (" + lieuLabel(s.lieu).toLowerCase() + (s.remplace ? ", remplace " + shortName(s.remplace) : "") + ")" : ci && ci.free ? cardioTitle(s).toLowerCase() : cNew ? (def ? def.short || def.name : "course") + (ci.ctype ? " (" + listLabel(CTYPES, ci.ctype).toLowerCase() + ")" : "") : s.plan ? s.plan.short : def ? def.short || def.name : s.type)];
   if (cNew) { var cs = cardioSummary(s, ci); if (cs) parts.push(cs); }
+  if (s.lim) parts.push("charges limitées (matériel de la maison), pas représentative de la force");
   var r = readiness(s.checkin); if (r) parts.push("forme " + fmt(r.avg, 1) + "/5 (" + CHECK.map(function (q) { return q.k + " " + s.checkin[q.k]; }).join(", ") + ")");
   if (isLib) (s.liste || []).forEach(function (it) {
     var c = CAT[it.k], rows = valuesOf((s.sets && s.sets[it.u]) || {}).filter(function (x) { return x && (toNum(x.c) !== null || toNum(x.r) || toNum(x.t)); });
@@ -4562,7 +4578,7 @@ function bilKeys(p) {
 function bilBest(wk, k) {
   var best = null;
   wk.ss.forEach(function (s) {
-    if (s.type !== k.t || !s.sets || !realData(s)) return;
+    if (s.type !== k.t || !s.sets || !realData(s) || !forceOk(s)) return;
     rowsOk(s.sets[k.id]).forEach(function (r) { var c = toNum(r.c), sc = e1rm(c + (k.e.bw ? bodyweight(s.date) : 0), toNum(r.r), 0); if (!best || sc > best.sc) best = { c: c, r: toNum(r.r), sc: sc }; });
   });
   return best;

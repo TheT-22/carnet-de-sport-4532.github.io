@@ -516,3 +516,4 @@ ul.rules { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
 .opt .small { display: block; margin-top: 2px; }
 .opt .radio { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--steel); margin-top: 1px; box-sizing: border-box; }
 .opt[aria-checked="true"] .radio { border: 7px solid var(--plate); }
+.note .linkbtn { text-align: left; }
