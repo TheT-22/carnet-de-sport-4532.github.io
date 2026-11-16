@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.18.2";
+var APP_VERSION = "1.18.3";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -112,6 +112,19 @@ var CATALOGUE = [
     { k: "curl-halt", n: "Curl biceps, haltères", per: true, gr: "pull", mu: { biceps: 1 } },
     { k: "curl-incl", n: "Curl incliné, haltères", per: true, gr: "pull", mu: { biceps: 1 } },
     { k: "ext-poulie", n: "Extension triceps, poulie", gr: "push", mu: { triceps: 1 } },
+    { k: "ext-pb-corde", n: "Extension triceps vers le bas, corde", gr: "push", mu: { triceps: 1 } },
+    { k: "ext-pb-v", n: "Extension triceps vers le bas, barre en V", gr: "push", mu: { triceps: 1 } },
+    { k: "ext-pb-barre", n: "Extension triceps vers le bas, barre droite", gr: "push", mu: { triceps: 1 } },
+    { k: "ext-pb-inv", n: "Extension triceps vers le bas, prise inversée", gr: "push", mu: { triceps: 1 } },
+    { k: "ext-pb-1b", n: "Extension triceps vers le bas, un bras, poignée", gr: "push", mu: { triceps: 1 } },
+    { k: "ext-pb-1b-nu", n: "Extension triceps vers le bas, un bras, sans poignée", gr: "push", mu: { triceps: 1 } },
+    { k: "ext-pt-corde", n: "Extension triceps au-dessus de la tête, poulie, corde", gr: "push", mu: { triceps: 1 } },
+    { k: "ext-pt-barre", n: "Extension triceps au-dessus de la tête, poulie, barre droite", gr: "push", mu: { triceps: 1 } },
+    { k: "ext-pt-1b", n: "Extension triceps au-dessus de la tête, poulie, un bras", gr: "push", mu: { triceps: 1 } },
+    { k: "ext-katana", n: "Extension triceps Katana, poulie", gr: "push", mu: { triceps: 1 } },
+    { k: "kickback-poulie", n: "Kickback triceps, poulie", gr: "push", mu: { triceps: 1 } },
+    { k: "ext-croisee", n: "Extension triceps croisée, poulie, un bras", gr: "push", mu: { triceps: 1 } },
+    { k: "ext-banc-poulie", n: "Extension triceps allongé, poulie", gr: "push", mu: { triceps: 1 } },
     { k: "ext-tete", n: "Extension triceps au-dessus de la tête", gr: "push", mu: { triceps: 1 } },
     { k: "ext-halt", n: "Extension triceps, haltère", gr: "push", mu: { triceps: 1 } }] },
   { g: "Jambes", ex: [
@@ -160,6 +173,9 @@ var BANK_MATCH = [
   ["el-lat-poulie", ["elevation", "lateral", "poulie"]], ["el-lat", ["elevation", "lateral"]], ["ecarte-poulie-mi", ["ecarte", "poulie", "mi hauteur"]], ["ecarte-poulie-haute", ["ecarte", "poulie", "haute"]], ["ecarte-poulie-basse", ["ecarte", "poulie", "basse"]], ["ecarte-poulie-mi", ["ecarte", "poulie"]],
   ["tirage-vert", ["tirage vertical"]], ["tirage-horiz", ["tirage horizontal"]], ["row-1b", ["rowing", "un bras"]], ["row-barre", ["rowing", "barre"]],
   ["tractions-neutre", ["traction", "neutre"]], ["tractions-supi", ["traction", "supination"]], ["tractions", ["traction"]], ["curl-incl", ["curl", "incline"]], ["curl-halt", ["curl", "haltere"]], ["curl-barre", ["curl", "barre"]],
+  ["ext-katana", ["katana"]], ["kickback-poulie", ["kickback", "poulie"]], ["ext-croisee", ["triceps", "croise"]], ["ext-banc-poulie", ["triceps", "allonge", "poulie"]],
+  ["ext-pt-1b", ["triceps", "tete", "poulie", "un bras"]], ["ext-pt-corde", ["triceps", "tete", "corde"]], ["ext-pt-barre", ["triceps", "tete", "poulie", "barre"]],
+  ["ext-pb-1b-nu", ["triceps", "un bras", "sans poignee"]], ["ext-pb-1b", ["triceps", "vers le bas", "un bras"]], ["ext-pb-inv", ["triceps", "vers le bas", "inverse"]], ["ext-pb-v", ["triceps", "barre en v"]], ["ext-pb-corde", ["triceps", "vers le bas", "corde"]], ["ext-pb-barre", ["triceps", "vers le bas", "barre"]],
   ["ext-tete", ["extension", "triceps", "tete"]], ["ext-halt", ["extension", "triceps", "haltere"]], ["ext-poulie", ["extension", "triceps", "poulie"]],
   ["front-squat", ["front squat"]], ["front-squat", ["squat", "avant"]], ["squat-halt", ["squat", "haltere"]], ["squat", ["squat", "barre"]], ["hack-squat", ["hack"]], ["fente-bulg", ["fente bulgare"]], ["fentes", ["fentes avant"]],
   ["sdtr-halt", ["roumain", "haltere"]], ["sdtr-barre", ["roumain"]], ["sdt", ["souleve de terre"]], ["mollets", ["mollet"]]
@@ -2254,7 +2270,7 @@ drawerEl().addEventListener("focusout", function () {
 /* Modèles vérifiés (Schoenfeld 2017 ; Pelland 2026 ; ACSM 2026) : environ 10 séries fractionnées
    par muscle et par semaine, séances de 1 h 15 au plus, échauffement de 10 min compris.
    L'objectif ne change pas les exercices : répétitions, RIR, repos et, en force, séries d'isolation. */
-var ISO_K = ["superman", "hip-thrust", "el-lat", "el-lat-poulie", "ecarte-poulie", "ecarte-poulie-haute", "ecarte-poulie-mi", "ecarte-poulie-basse", "pec-deck", "curl-barre", "curl-halt", "curl-incl", "ext-poulie", "ext-tete", "ext-halt", "face-pull", "leg-curl", "mollets", "oiseau", "gainage", "gainage-lat", "releve"];
+var ISO_K = ["superman", "hip-thrust", "el-lat", "el-lat-poulie", "ecarte-poulie", "ecarte-poulie-haute", "ecarte-poulie-mi", "ecarte-poulie-basse", "pec-deck", "curl-barre", "curl-halt", "curl-incl", "ext-poulie", "ext-tete", "ext-pb-corde", "ext-pb-v", "ext-pb-barre", "ext-pb-inv", "ext-pb-1b", "ext-pb-1b-nu", "ext-pt-corde", "ext-pt-barre", "ext-pt-1b", "ext-katana", "kickback-poulie", "ext-croisee", "ext-banc-poulie", "ext-halt", "face-pull", "leg-curl", "mollets", "oiseau", "gainage", "gainage-lat", "releve"];
 var UNI_K = ["row-1b", "fente-bulg"];
 var MATS = [{ v: "salle", l: "Salle complète" }, { v: "halt", l: "Haltères et banc" }, { v: "street", l: "Street workout" }, { v: "corps", l: "Sans matériel" }];
 var OBJS = [
