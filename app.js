@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.18.1";
+var APP_VERSION = "1.18.2";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -89,7 +89,6 @@ var CATALOGUE = [
     { k: "pompes-genoux", n: "Pompes à genoux", bw: true, bwf: 0.49, gr: "push", mu: { pecs: 1, triceps: 0.5, epaules: 0.5 } },
     { k: "pompes-chaise", n: "Pompes inclinées, mains sur une chaise", bw: true, bwf: 0.55, gr: "push", mu: { pecs: 1, triceps: 0.5, epaules: 0.5 } },
     { k: "pompes-pieds", n: "Pompes pieds surélevés", bw: true, bwf: 0.7, gr: "push", mu: { pecs: 1, triceps: 0.5, epaules: 0.5 } },
-    { k: "ecarte-poulie", n: "Écarté à la poulie", gr: "push", mu: { pecs: 1 } },
     { k: "ecarte-poulie-haute", n: "Écarté à la poulie haute", gr: "push", mu: { pecs: 1 } },
     { k: "ecarte-poulie-mi", n: "Écarté à la poulie mi-hauteur", gr: "push", mu: { pecs: 1 } },
     { k: "ecarte-poulie-basse", n: "Écarté à la poulie basse", gr: "push", mu: { pecs: 1 } },
@@ -158,7 +157,7 @@ var BANK_MATCH = [
   ["gainage-lat", ["gainage", "lateral"]], ["gainage", ["gainage"]],
   ["dc-halt", ["developpe couche", "haltere"]], ["dc-barre", ["developpe couche"]], ["di-halt", ["developpe incline", "haltere"]],
   ["dm-halt", ["developpe militaire", "haltere"]], ["dm-barre", ["developpe militaire"]], ["dips", ["dips"]], ["pompes-serrees", ["pompe", "serree"]], ["pompes", ["pompe"]],
-  ["el-lat-poulie", ["elevation", "lateral", "poulie"]], ["el-lat", ["elevation", "lateral"]], ["ecarte-poulie-mi", ["ecarte", "poulie", "mi hauteur"]], ["ecarte-poulie-haute", ["ecarte", "poulie", "haute"]], ["ecarte-poulie-basse", ["ecarte", "poulie", "basse"]], ["ecarte-poulie", ["ecarte", "poulie"]],
+  ["el-lat-poulie", ["elevation", "lateral", "poulie"]], ["el-lat", ["elevation", "lateral"]], ["ecarte-poulie-mi", ["ecarte", "poulie", "mi hauteur"]], ["ecarte-poulie-haute", ["ecarte", "poulie", "haute"]], ["ecarte-poulie-basse", ["ecarte", "poulie", "basse"]], ["ecarte-poulie-mi", ["ecarte", "poulie"]],
   ["tirage-vert", ["tirage vertical"]], ["tirage-horiz", ["tirage horizontal"]], ["row-1b", ["rowing", "un bras"]], ["row-barre", ["rowing", "barre"]],
   ["tractions-neutre", ["traction", "neutre"]], ["tractions-supi", ["traction", "supination"]], ["tractions", ["traction"]], ["curl-incl", ["curl", "incline"]], ["curl-halt", ["curl", "haltere"]], ["curl-barre", ["curl", "barre"]],
   ["ext-tete", ["extension", "triceps", "tete"]], ["ext-halt", ["extension", "triceps", "haltere"]], ["ext-poulie", ["extension", "triceps", "poulie"]],
@@ -175,7 +174,7 @@ function bankMatch(name) {
   return found;
 }
 /* Code de bibliothèque d'un exercice de programme : celui que le programme donne, sinon reconnu d'après le nom */
-function exCat(e) { if (!e) return ""; if (e.cat && CAT[e.cat]) return e.cat; return bankMatch(e.name); }
+function exCat(e) { if (!e) return ""; if (e.cat && CAT[e.cat]) return catK(e.cat); return bankMatch(e.name); }
 /* Volume : séries de travail fractionnées (1 pour le muscle travaillé directement, 0,5 pour un muscle
    qui aide ; Pelland et al., Sports Medicine 2026). Vue par groupe : chaque série compte une fois,
    dans le groupe de son mouvement. */
@@ -185,6 +184,10 @@ var MUSCLE_GROUPE = { biceps: "pull", triceps: "push", epaules: "push", pecs: "p
 var RIR_MAX_SERIE = 4;
 var CAT = {}, CAT_ORDER = {};
 CATALOGUE.forEach(function (g) { g.ex.forEach(function (c) { CAT_ORDER[c.k] = keysOf(CAT).length; CAT[c.k] = c; }); });
+/* Anciens codes retirés de la liste : les séances et programmes qui les citent pointent vers l'exercice qui les remplace */
+var CAT_ALIAS = { "ecarte-poulie": "ecarte-poulie-mi" };
+keysOf(CAT_ALIAS).forEach(function (k) { CAT[k] = CAT[CAT_ALIAS[k]]; CAT_ORDER[k] = CAT_ORDER[CAT_ALIAS[k]]; });
+function catK(k) { return k && CAT[k] ? CAT[k].k : k; }
 var LIBRE = "LIBRE";
 /* Programme sans matériel : variantes de plus en plus difficiles d'un même mouvement.
    Pompes classées par part du poids de corps poussée (Ebben et al., J Strength Cond Res 2011) ;
@@ -920,7 +923,7 @@ function progEx(s, id) {
 }
 function catRows(s, k) {
   var out = [];
-  if (s.type === LIBRE) (s.liste || []).forEach(function (it) { if (it.k === k && s.sets && s.sets[it.u]) out = out.concat(rowsFor(CAT[k], s.sets[it.u])); });
+  if (s.type === LIBRE) (s.liste || []).forEach(function (it) { if (catK(it.k) === k && s.sets && s.sets[it.u]) out = out.concat(rowsFor(CAT[k], s.sets[it.u])); });
   else if (s.sets) keysOf(s.sets).forEach(function (exId) { var e = progEx(s, exId); if (e && e.cat === k) out = out.concat(rowsOk(s.sets[exId])); });
   if (s.type !== LIBRE) keysOf(s.remp).forEach(function (exId) { var r = s.remp[exId]; if (r && r.sets && rempCat(r) === k) out = out.concat(rowsOk(r.sets)); });
   return out;
@@ -982,7 +985,7 @@ function libreEx(s, id, it, i, date) {
   if (it.k === "autre") h += '<label class="field"><span>Nom de l\'exercice</span>' + inp("seances", id, "liste." + i + ".nom", it.nom, 'placeholder="ex. Rotation externe à l\'élastique"') + "</label>" +
     '<div class="scale"><div class="scale-q"><span>Muscle travaillé</span></div>' + seg("seances", id, "liste." + i + ".mu", MUSCLES.map(function (m) { return { v: m[0], l: m[1] }; }), it.mu) + "</div>" +
     '<p class="small muted">Noté dans le journal et le résumé pour Claude, et compté dans le volume du muscle choisi. Pas de courbe de force pour cet exercice.</p>';
-  var last = it.k === "autre" ? (it.nom ? lastAutre(it.nom, date) : null) : c ? lastCat(it.k, date) : null;
+  var last = it.k === "autre" ? (it.nom ? lastAutre(it.nom, date) : null) : c ? lastCat(catK(it.k), date) : null;
   h += '<p class="advice">' + (last ? "Dernière fois : " + esc(perfText(c, last.best)) + ' <span class="muted">(' + esc(fmtShort(last.date)) + (last.salle ? ", à la salle" : "") + ")</span>"
     : time ? "Première fois : note la durée tenue et la marge qu'il te restait." : "Première fois sur cet exercice : choisis une charge qui laisse 2 répétitions en réserve.") + "</p>";
   if (s.lim && last && !time) h += '<p class="small muted">Avec tes charges du jour, vise le même RIR en faisant plus de répétitions ; ces séries ne changent pas tes charges de salle.</p>';
@@ -1091,7 +1094,7 @@ function rempMenu(id, exId, e) {
   openSheet(h, function (b, close) { close(); if (b.dataset.sh === "pick") setRemp(id, exId, b.dataset.k); }, true);
 }
 /* Exercice de bibliothèque d'un remplacement : choisi dans la liste, ou reconnu d'après le nom écrit */
-function rempCat(r) { if (!r) return ""; if (r.k && CAT[r.k]) return r.k; return bankMatch(r.nom); }
+function rempCat(r) { if (!r) return ""; if (r.k && CAT[r.k]) return catK(r.k); return bankMatch(r.nom); }
 function setRemp(id, exId, k) {
   var doc = docFor("seances", id), rp = (doc.remp && doc.remp[exId]) || {};
   if (k) { rp.k = k; rp.nom = CAT[k].n; } else { delete rp.k; delete rp.nom; }
@@ -1100,7 +1103,7 @@ function setRemp(id, exId, k) {
 function libreMenu(id) {
   var date = id.slice(0, id.lastIndexOf("_")), s = D.seances[id], present = {};
   if (!s) return;
-  (s.liste || []).forEach(function (it) { present[it.k] = true; });
+  (s.liste || []).forEach(function (it) { present[catK(it.k)] = true; });
   var h = '<h2 id="dlg-t">Ajouter un exercice</h2><p class="small muted">Touche un exercice pour l\'ajouter à la fin de la séance.</p>';
   CATALOGUE.forEach(function (g) {
     if (g.hidden) return;
@@ -2023,10 +2026,10 @@ function curveIndex() {
     if ((!s.sets && !s.remp) || !forceOk(s)) return;
     if (s.type === LIBRE) {
       if (!s.sets) return;
-      (s.liste || []).forEach(function (it) { var c = CAT[it.k]; if (c && !c.time && s.sets[it.u]) add("cat:" + it.k, c.n, CAT_ORDER[it.k], c.bw, c.bwf, s, rowsOk(s.sets[it.u]), true); });
+      (s.liste || []).forEach(function (it) { var c = CAT[it.k]; if (c && !c.time && s.sets[it.u]) add("cat:" + c.k, c.n, CAT_ORDER[c.k], c.bw, c.bwf, s, rowsOk(s.sets[it.u]), true); });
       return;
     }
-    keysOf(s.remp).forEach(function (exId) { var r = s.remp[exId], rk = rempCat(r), c = CAT[rk]; if (c && !c.time && r.sets) add("cat:" + rk, c.n, CAT_ORDER[r.k], c.bw, c.bwf, s, rowsOk(r.sets), false); });
+    keysOf(s.remp).forEach(function (exId) { var r = s.remp[exId], rk = rempCat(r), c = CAT[rk]; if (c && !c.time && r.sets) add("cat:" + rk, c.n, CAT_ORDER[rk], c.bw, c.bwf, s, rowsOk(r.sets), false); });
     keysOf(s.sets).forEach(function (exId) {
       var e = progEx(s, exId); if (!e) return;
       if (e.cat && CAT[e.cat]) add("cat:" + e.cat, CAT[e.cat].n, CAT_ORDER[e.cat], e.bw, CAT[e.cat].bwf, s, rowsOk(s.sets[exId]), false);
@@ -2273,13 +2276,13 @@ var CORPS = [["Renforcement A", [XE("squat-pdc", 3, "10–20"), XE("pompes-genou
 var MODELES = {
   salle: {
     fb: [["Full body A", [X("squat", 3, "6–10"), X("dc-barre", 4, "6–10"), X("tirage-vert", 4, "8–12"), X("sdtr-barre", 3, "8–10"), X("el-lat", 3, "12–15"), X("curl-halt", 2, "10–15"), X("ext-poulie", 2, "10–15")]],
-      ["Full body B", [X("hack-squat", 4, "8–12"), X("dm-halt", 3, "8–12"), X("row-barre", 3, "8–12"), X("leg-curl", 4, "10–15"), X("ecarte-poulie", 3, "12–15"), X("curl-incl", 3, "10–15"), X("mollets", 3, "10–15")]],
+      ["Full body B", [X("hack-squat", 4, "8–12"), X("dm-halt", 3, "8–12"), X("row-barre", 3, "8–12"), X("leg-curl", 4, "10–15"), X("ecarte-poulie-mi", 3, "12–15"), X("curl-incl", 3, "10–15"), X("mollets", 3, "10–15")]],
       ["Full body C", [X("fente-bulg", 3, "8–12"), X("di-halt", 3, "8–12"), X("tractions", 3, "6–10"), X("sdtr-halt", 3, "8–12"), X("el-lat-poulie", 2, "12–15"), X("ext-tete", 3, "10–15"), X("mollets", 3, "10–15"), X("gainage", 2, "30–60 s")]]],
     hb: [["Haut 1", [X("dc-barre", 4, "6–8"), X("row-barre", 3, "6–10"), X("dm-halt", 2, "8–12"), X("tirage-vert", 3, "8–12"), X("el-lat", 3, "12–15"), X("curl-barre", 2, "8–12"), X("ext-poulie", 2, "10–15")]],
       ["Bas 1", [X("squat", 3, "6–8"), X("sdtr-barre", 3, "8–10"), X("fente-bulg", 2, "8–12"), X("leg-curl", 2, "10–15"), X("mollets", 3, "10–15"), X("gainage", 2, "30–60 s")]],
       ["Haut 2", [X("di-halt", 3, "8–12"), X("tractions", 3, "6–10"), X("dips", 3, "8–12"), X("tirage-horiz", 3, "10–12"), X("el-lat-poulie", 3, "12–15"), X("curl-incl", 2, "10–15"), X("ext-tete", 2, "10–15")]],
       ["Bas 2", [X("hack-squat", 3, "8–12"), X("leg-curl", 3, "10–15"), X("sdtr-halt", 2, "8–12"), X("fente-bulg", 2, "10–15"), X("mollets", 3, "10–15"), X("gainage-lat", 2, "30–45 s")]]],
-    ppl: [["Push", [X("dc-barre", 4, "6–10"), X("di-halt", 4, "8–12"), X("ecarte-poulie", 2, "12–15"), X("dm-halt", 2, "8–12"), X("el-lat", 4, "12–15"), X("ext-poulie", 3, "10–15"), X("ext-tete", 2, "10–15"), X("mollets", 3, "10–15")]],
+    ppl: [["Push", [X("dc-barre", 4, "6–10"), X("di-halt", 4, "8–12"), X("ecarte-poulie-mi", 2, "12–15"), X("dm-halt", 2, "8–12"), X("el-lat", 4, "12–15"), X("ext-poulie", 3, "10–15"), X("ext-tete", 2, "10–15"), X("mollets", 3, "10–15")]],
       ["Pull", [X("tractions", 4, "6–10"), X("row-barre", 3, "8–12"), X("tirage-horiz", 3, "10–12"), X("face-pull", 2, "15–20"), X("curl-barre", 3, "8–12"), X("curl-incl", 3, "10–15"), X("mollets", 3, "10–15"), X("gainage", 2, "30–60 s")]],
       ["Legs", [X("squat", 4, "6–10"), X("hack-squat", 3, "8–12"), X("fente-bulg", 2, "8–12"), X("sdt", 3, "5–8"), X("leg-curl", 4, "10–15"), X("sdtr-halt", 3, "8–12")]]] },
   halt: {
