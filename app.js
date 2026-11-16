@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.18.3";
+var APP_VERSION = "1.18.4";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -111,7 +111,6 @@ var CATALOGUE = [
     { k: "curl-barre", n: "Curl biceps, barre", gr: "pull", mu: { biceps: 1 } },
     { k: "curl-halt", n: "Curl biceps, haltères", per: true, gr: "pull", mu: { biceps: 1 } },
     { k: "curl-incl", n: "Curl incliné, haltères", per: true, gr: "pull", mu: { biceps: 1 } },
-    { k: "ext-poulie", n: "Extension triceps, poulie", gr: "push", mu: { triceps: 1 } },
     { k: "ext-pb-corde", n: "Extension triceps vers le bas, corde", gr: "push", mu: { triceps: 1 } },
     { k: "ext-pb-v", n: "Extension triceps vers le bas, barre en V", gr: "push", mu: { triceps: 1 } },
     { k: "ext-pb-barre", n: "Extension triceps vers le bas, barre droite", gr: "push", mu: { triceps: 1 } },
@@ -125,7 +124,6 @@ var CATALOGUE = [
     { k: "kickback-poulie", n: "Kickback triceps, poulie", gr: "push", mu: { triceps: 1 } },
     { k: "ext-croisee", n: "Extension triceps croisée, poulie, un bras", gr: "push", mu: { triceps: 1 } },
     { k: "ext-banc-poulie", n: "Extension triceps allongé, poulie", gr: "push", mu: { triceps: 1 } },
-    { k: "ext-tete", n: "Extension triceps au-dessus de la tête", gr: "push", mu: { triceps: 1 } },
     { k: "ext-halt", n: "Extension triceps, haltère", gr: "push", mu: { triceps: 1 } }] },
   { g: "Jambes", ex: [
     { k: "squat", n: "Squat", gr: "jambes", mu: { quadri: 1 } },
@@ -170,13 +168,13 @@ var BANK_MATCH = [
   ["gainage-lat", ["gainage", "lateral"]], ["gainage", ["gainage"]],
   ["dc-halt", ["developpe couche", "haltere"]], ["dc-barre", ["developpe couche"]], ["di-halt", ["developpe incline", "haltere"]],
   ["dm-halt", ["developpe militaire", "haltere"]], ["dm-barre", ["developpe militaire"]], ["dips", ["dips"]], ["pompes-serrees", ["pompe", "serree"]], ["pompes", ["pompe"]],
-  ["el-lat-poulie", ["elevation", "lateral", "poulie"]], ["el-lat", ["elevation", "lateral"]], ["ecarte-poulie-mi", ["ecarte", "poulie", "mi hauteur"]], ["ecarte-poulie-haute", ["ecarte", "poulie", "haute"]], ["ecarte-poulie-basse", ["ecarte", "poulie", "basse"]], ["ecarte-poulie-mi", ["ecarte", "poulie"]],
+  ["el-lat-poulie", ["elevation", "lateral", "poulie"]], ["el-lat", ["elevation", "lateral"]], ["ecarte-poulie-mi", ["ecarte", "poulie", "mi hauteur"]], ["ecarte-poulie-haute", ["ecarte", "poulie", "haute"]], ["ecarte-poulie-basse", ["ecarte", "poulie", "basse"]], ["ecarte-poulie", ["ecarte", "poulie"]],
   ["tirage-vert", ["tirage vertical"]], ["tirage-horiz", ["tirage horizontal"]], ["row-1b", ["rowing", "un bras"]], ["row-barre", ["rowing", "barre"]],
   ["tractions-neutre", ["traction", "neutre"]], ["tractions-supi", ["traction", "supination"]], ["tractions", ["traction"]], ["curl-incl", ["curl", "incline"]], ["curl-halt", ["curl", "haltere"]], ["curl-barre", ["curl", "barre"]],
   ["ext-katana", ["katana"]], ["kickback-poulie", ["kickback", "poulie"]], ["ext-croisee", ["triceps", "croise"]], ["ext-banc-poulie", ["triceps", "allonge", "poulie"]],
   ["ext-pt-1b", ["triceps", "tete", "poulie", "un bras"]], ["ext-pt-corde", ["triceps", "tete", "corde"]], ["ext-pt-barre", ["triceps", "tete", "poulie", "barre"]],
   ["ext-pb-1b-nu", ["triceps", "un bras", "sans poignee"]], ["ext-pb-1b", ["triceps", "vers le bas", "un bras"]], ["ext-pb-inv", ["triceps", "vers le bas", "inverse"]], ["ext-pb-v", ["triceps", "barre en v"]], ["ext-pb-corde", ["triceps", "vers le bas", "corde"]], ["ext-pb-barre", ["triceps", "vers le bas", "barre"]],
-  ["ext-tete", ["extension", "triceps", "tete"]], ["ext-halt", ["extension", "triceps", "haltere"]], ["ext-poulie", ["extension", "triceps", "poulie"]],
+  ["ext-halt", ["triceps", "tete", "haltere"]], ["ext-tete", ["extension", "triceps", "tete"]], ["ext-halt", ["extension", "triceps", "haltere"]], ["ext-poulie", ["extension", "triceps", "poulie"]],
   ["front-squat", ["front squat"]], ["front-squat", ["squat", "avant"]], ["squat-halt", ["squat", "haltere"]], ["squat", ["squat", "barre"]], ["hack-squat", ["hack"]], ["fente-bulg", ["fente bulgare"]], ["fentes", ["fentes avant"]],
   ["sdtr-halt", ["roumain", "haltere"]], ["sdtr-barre", ["roumain"]], ["sdt", ["souleve de terre"]], ["mollets", ["mollet"]]
 ];
@@ -190,7 +188,9 @@ function bankMatch(name) {
   return found;
 }
 /* Code de bibliothèque d'un exercice de programme : celui que le programme donne, sinon reconnu d'après le nom */
-function exCat(e) { if (!e) return ""; if (e.cat && CAT[e.cat]) return catK(e.cat); return bankMatch(e.name); }
+/* Code tel qu'il est enregistré (ancien code éventuel), puis code actuel de la bibliothèque */
+function rawCat(e) { if (!e) return ""; if (e.cat && CAT[e.cat]) return e.cat; return bankMatch(e.name); }
+function exCat(e) { return catK(rawCat(e)); }
 /* Volume : séries de travail fractionnées (1 pour le muscle travaillé directement, 0,5 pour un muscle
    qui aide ; Pelland et al., Sports Medicine 2026). Vue par groupe : chaque série compte une fois,
    dans le groupe de son mouvement. */
@@ -201,7 +201,7 @@ var RIR_MAX_SERIE = 4;
 var CAT = {}, CAT_ORDER = {};
 CATALOGUE.forEach(function (g) { g.ex.forEach(function (c) { CAT_ORDER[c.k] = keysOf(CAT).length; CAT[c.k] = c; }); });
 /* Anciens codes retirés de la liste : les séances et programmes qui les citent pointent vers l'exercice qui les remplace */
-var CAT_ALIAS = { "ecarte-poulie": "ecarte-poulie-mi" };
+var CAT_ALIAS = { "ecarte-poulie": "ecarte-poulie-mi", "ext-poulie": "ext-pb-barre", "ext-tete": "ext-pt-corde" };
 keysOf(CAT_ALIAS).forEach(function (k) { CAT[k] = CAT[CAT_ALIAS[k]]; CAT_ORDER[k] = CAT_ORDER[CAT_ALIAS[k]]; });
 function catK(k) { return k && CAT[k] ? CAT[k].k : k; }
 var LIBRE = "LIBRE";
@@ -273,7 +273,7 @@ function freezeSession(s, prog) {
   if (def.kind !== "muscu") return false;
   s.plan = { name: def.name, short: def.short || def.name, ex: def.ex.map(function (e) {
     var p = presc(e, w); if (!p) return null;
-    var x = { id: e.id, name: e.name, bw: !!e.bw, cat: exCat(e), mu: e.mu || null, gr: e.gr || "", step: e.step || 2.5, rest: p.rest || e.rest, ss: e.ss || "", note: e.note || "", alt: e.alt || [], p: p };
+    var x = { id: e.id, name: e.name, bw: !!e.bw, cat: rawCat(e), mu: e.mu || null, gr: e.gr || "", step: e.step || 2.5, rest: p.rest || e.rest, ss: e.ss || "", note: e.note || "", alt: e.alt || [], p: p };
     if (e.code) x.code = e.code; if (e.time) x.time = true; if (e.ech) x.ech = true;
     return x;
   }).filter(Boolean) };
@@ -1093,7 +1093,7 @@ function primaryMuscle(e) {
 function rempSuggestions(e) {
   var own = exCat(e), pm = primaryMuscle(e), out = [];
   function ok(k) { var c = CAT[k]; return c && !c.time && k !== own && out.indexOf(k) < 0 && !CATALOGUE.some(function (g) { return g.hidden && g.ex.indexOf(c) >= 0; }); }
-  (e.alt || []).forEach(function (a) { var k = bankMatch(a); if (ok(k) && pm && CAT[k].mu && CAT[k].mu[pm]) out.push(k); });
+  (e.alt || []).forEach(function (a) { var k = catK(bankMatch(a)); if (ok(k) && pm && CAT[k].mu && CAT[k].mu[pm]) out.push(k); });
   if (pm) CATALOGUE.forEach(function (g) { if (!g.hidden) g.ex.forEach(function (c) { if (ok(c.k) && c.mu && c.mu[pm] === 1) out.push(c.k); }); });
   return out.slice(0, 6);
 }
@@ -1110,7 +1110,7 @@ function rempMenu(id, exId, e) {
   openSheet(h, function (b, close) { close(); if (b.dataset.sh === "pick") setRemp(id, exId, b.dataset.k); }, true);
 }
 /* Exercice de bibliothèque d'un remplacement : choisi dans la liste, ou reconnu d'après le nom écrit */
-function rempCat(r) { if (!r) return ""; if (r.k && CAT[r.k]) return catK(r.k); return bankMatch(r.nom); }
+function rempCat(r) { if (!r) return ""; if (r.k && CAT[r.k]) return catK(r.k); return catK(bankMatch(r.nom)); }
 function setRemp(id, exId, k) {
   var doc = docFor("seances", id), rp = (doc.remp && doc.remp[exId]) || {};
   if (k) { rp.k = k; rp.nom = CAT[k].n; } else { delete rp.k; delete rp.nom; }
@@ -2291,14 +2291,14 @@ var CORPS = [["Renforcement A", [XE("squat-pdc", 3, "10–20"), XE("pompes-genou
   ["Renforcement B", [XE("fentes-arr", 3, "8–15 par jambe"), XE("pompes-genoux", 3, "6–20"), X("chaise", 2, "30–60 s"), X("gainage-lat", 2, "15–30 s", "Durée pour chaque côté."), X("crunch", 2, "10–20")]]];
 var MODELES = {
   salle: {
-    fb: [["Full body A", [X("squat", 3, "6–10"), X("dc-barre", 4, "6–10"), X("tirage-vert", 4, "8–12"), X("sdtr-barre", 3, "8–10"), X("el-lat", 3, "12–15"), X("curl-halt", 2, "10–15"), X("ext-poulie", 2, "10–15")]],
+    fb: [["Full body A", [X("squat", 3, "6–10"), X("dc-barre", 4, "6–10"), X("tirage-vert", 4, "8–12"), X("sdtr-barre", 3, "8–10"), X("el-lat", 3, "12–15"), X("curl-halt", 2, "10–15"), X("ext-pb-barre", 2, "10–15")]],
       ["Full body B", [X("hack-squat", 4, "8–12"), X("dm-halt", 3, "8–12"), X("row-barre", 3, "8–12"), X("leg-curl", 4, "10–15"), X("ecarte-poulie-mi", 3, "12–15"), X("curl-incl", 3, "10–15"), X("mollets", 3, "10–15")]],
-      ["Full body C", [X("fente-bulg", 3, "8–12"), X("di-halt", 3, "8–12"), X("tractions", 3, "6–10"), X("sdtr-halt", 3, "8–12"), X("el-lat-poulie", 2, "12–15"), X("ext-tete", 3, "10–15"), X("mollets", 3, "10–15"), X("gainage", 2, "30–60 s")]]],
-    hb: [["Haut 1", [X("dc-barre", 4, "6–8"), X("row-barre", 3, "6–10"), X("dm-halt", 2, "8–12"), X("tirage-vert", 3, "8–12"), X("el-lat", 3, "12–15"), X("curl-barre", 2, "8–12"), X("ext-poulie", 2, "10–15")]],
+      ["Full body C", [X("fente-bulg", 3, "8–12"), X("di-halt", 3, "8–12"), X("tractions", 3, "6–10"), X("sdtr-halt", 3, "8–12"), X("el-lat-poulie", 2, "12–15"), X("ext-pt-corde", 3, "10–15"), X("mollets", 3, "10–15"), X("gainage", 2, "30–60 s")]]],
+    hb: [["Haut 1", [X("dc-barre", 4, "6–8"), X("row-barre", 3, "6–10"), X("dm-halt", 2, "8–12"), X("tirage-vert", 3, "8–12"), X("el-lat", 3, "12–15"), X("curl-barre", 2, "8–12"), X("ext-pb-barre", 2, "10–15")]],
       ["Bas 1", [X("squat", 3, "6–8"), X("sdtr-barre", 3, "8–10"), X("fente-bulg", 2, "8–12"), X("leg-curl", 2, "10–15"), X("mollets", 3, "10–15"), X("gainage", 2, "30–60 s")]],
-      ["Haut 2", [X("di-halt", 3, "8–12"), X("tractions", 3, "6–10"), X("dips", 3, "8–12"), X("tirage-horiz", 3, "10–12"), X("el-lat-poulie", 3, "12–15"), X("curl-incl", 2, "10–15"), X("ext-tete", 2, "10–15")]],
+      ["Haut 2", [X("di-halt", 3, "8–12"), X("tractions", 3, "6–10"), X("dips", 3, "8–12"), X("tirage-horiz", 3, "10–12"), X("el-lat-poulie", 3, "12–15"), X("curl-incl", 2, "10–15"), X("ext-pt-corde", 2, "10–15")]],
       ["Bas 2", [X("hack-squat", 3, "8–12"), X("leg-curl", 3, "10–15"), X("sdtr-halt", 2, "8–12"), X("fente-bulg", 2, "10–15"), X("mollets", 3, "10–15"), X("gainage-lat", 2, "30–45 s")]]],
-    ppl: [["Push", [X("dc-barre", 4, "6–10"), X("di-halt", 4, "8–12"), X("ecarte-poulie-mi", 2, "12–15"), X("dm-halt", 2, "8–12"), X("el-lat", 4, "12–15"), X("ext-poulie", 3, "10–15"), X("ext-tete", 2, "10–15"), X("mollets", 3, "10–15")]],
+    ppl: [["Push", [X("dc-barre", 4, "6–10"), X("di-halt", 4, "8–12"), X("ecarte-poulie-mi", 2, "12–15"), X("dm-halt", 2, "8–12"), X("el-lat", 4, "12–15"), X("ext-pb-barre", 3, "10–15"), X("ext-pt-corde", 2, "10–15"), X("mollets", 3, "10–15")]],
       ["Pull", [X("tractions", 4, "6–10"), X("row-barre", 3, "8–12"), X("tirage-horiz", 3, "10–12"), X("face-pull", 2, "15–20"), X("curl-barre", 3, "8–12"), X("curl-incl", 3, "10–15"), X("mollets", 3, "10–15"), X("gainage", 2, "30–60 s")]],
       ["Legs", [X("squat", 4, "6–10"), X("hack-squat", 3, "8–12"), X("fente-bulg", 2, "8–12"), X("sdt", 3, "5–8"), X("leg-curl", 4, "10–15"), X("sdtr-halt", 3, "8–12")]]] },
   halt: {
