@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.18.0";
+var APP_VERSION = "1.18.1";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -90,6 +90,9 @@ var CATALOGUE = [
     { k: "pompes-chaise", n: "Pompes inclinées, mains sur une chaise", bw: true, bwf: 0.55, gr: "push", mu: { pecs: 1, triceps: 0.5, epaules: 0.5 } },
     { k: "pompes-pieds", n: "Pompes pieds surélevés", bw: true, bwf: 0.7, gr: "push", mu: { pecs: 1, triceps: 0.5, epaules: 0.5 } },
     { k: "ecarte-poulie", n: "Écarté à la poulie", gr: "push", mu: { pecs: 1 } },
+    { k: "ecarte-poulie-haute", n: "Écarté à la poulie haute", gr: "push", mu: { pecs: 1 } },
+    { k: "ecarte-poulie-mi", n: "Écarté à la poulie mi-hauteur", gr: "push", mu: { pecs: 1 } },
+    { k: "ecarte-poulie-basse", n: "Écarté à la poulie basse", gr: "push", mu: { pecs: 1 } },
     { k: "pec-deck", n: "Pec deck", gr: "push", mu: { pecs: 1 } },
     { k: "el-lat", n: "Élévations latérales, haltères", per: true, gr: "push", mu: { epaules: 1 } },
     { k: "el-lat-poulie", n: "Élévation latérale à la poulie", gr: "push", mu: { epaules: 1 } },
@@ -155,7 +158,7 @@ var BANK_MATCH = [
   ["gainage-lat", ["gainage", "lateral"]], ["gainage", ["gainage"]],
   ["dc-halt", ["developpe couche", "haltere"]], ["dc-barre", ["developpe couche"]], ["di-halt", ["developpe incline", "haltere"]],
   ["dm-halt", ["developpe militaire", "haltere"]], ["dm-barre", ["developpe militaire"]], ["dips", ["dips"]], ["pompes-serrees", ["pompe", "serree"]], ["pompes", ["pompe"]],
-  ["el-lat-poulie", ["elevation", "lateral", "poulie"]], ["el-lat", ["elevation", "lateral"]], ["ecarte-poulie", ["ecarte", "poulie"]],
+  ["el-lat-poulie", ["elevation", "lateral", "poulie"]], ["el-lat", ["elevation", "lateral"]], ["ecarte-poulie-mi", ["ecarte", "poulie", "mi hauteur"]], ["ecarte-poulie-haute", ["ecarte", "poulie", "haute"]], ["ecarte-poulie-basse", ["ecarte", "poulie", "basse"]], ["ecarte-poulie", ["ecarte", "poulie"]],
   ["tirage-vert", ["tirage vertical"]], ["tirage-horiz", ["tirage horizontal"]], ["row-1b", ["rowing", "un bras"]], ["row-barre", ["rowing", "barre"]],
   ["tractions-neutre", ["traction", "neutre"]], ["tractions-supi", ["traction", "supination"]], ["tractions", ["traction"]], ["curl-incl", ["curl", "incline"]], ["curl-halt", ["curl", "haltere"]], ["curl-barre", ["curl", "barre"]],
   ["ext-tete", ["extension", "triceps", "tete"]], ["ext-halt", ["extension", "triceps", "haltere"]], ["ext-poulie", ["extension", "triceps", "poulie"]],
@@ -2248,7 +2251,7 @@ drawerEl().addEventListener("focusout", function () {
 /* Modèles vérifiés (Schoenfeld 2017 ; Pelland 2026 ; ACSM 2026) : environ 10 séries fractionnées
    par muscle et par semaine, séances de 1 h 15 au plus, échauffement de 10 min compris.
    L'objectif ne change pas les exercices : répétitions, RIR, repos et, en force, séries d'isolation. */
-var ISO_K = ["superman", "hip-thrust", "el-lat", "el-lat-poulie", "ecarte-poulie", "pec-deck", "curl-barre", "curl-halt", "curl-incl", "ext-poulie", "ext-tete", "ext-halt", "face-pull", "leg-curl", "mollets", "oiseau", "gainage", "gainage-lat", "releve"];
+var ISO_K = ["superman", "hip-thrust", "el-lat", "el-lat-poulie", "ecarte-poulie", "ecarte-poulie-haute", "ecarte-poulie-mi", "ecarte-poulie-basse", "pec-deck", "curl-barre", "curl-halt", "curl-incl", "ext-poulie", "ext-tete", "ext-halt", "face-pull", "leg-curl", "mollets", "oiseau", "gainage", "gainage-lat", "releve"];
 var UNI_K = ["row-1b", "fente-bulg"];
 var MATS = [{ v: "salle", l: "Salle complète" }, { v: "halt", l: "Haltères et banc" }, { v: "street", l: "Street workout" }, { v: "corps", l: "Sans matériel" }];
 var OBJS = [
