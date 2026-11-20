@@ -6,7 +6,7 @@
 (function () {
 "use strict";
 
-var APP_VERSION = "1.18.4";
+var APP_VERSION = "1.18.5";
 var KEY = "carnet-muscu:v1";
 
 /* ================= Stockage local ================= */
@@ -105,6 +105,7 @@ var CATALOGUE = [
     { k: "tirage-horiz", n: "Tirage horizontal à la poulie", gr: "pull", mu: { dorsal: 1, trapezes: 0.5, biceps: 0.5 } },
     { k: "row-barre", n: "Rowing, barre", gr: "pull", mu: { dorsal: 1, trapezes: 0.5, biceps: 0.5 } },
     { k: "row-1b", n: "Rowing un bras, haltère", gr: "pull", mu: { dorsal: 1, biceps: 0.5 } },
+    { k: "row-machine-disques", n: "Rowing assis, machine à disques", gr: "pull", mu: { dorsal: 1, trapezes: 0.5, biceps: 0.5 } },
     { k: "face-pull", n: "Face pull", gr: "pull", mu: { epaules: 1, trapezes: 0.5 } },
     { k: "oiseau", n: "Oiseau, haltères", per: true, gr: "pull", mu: { epaules: 1, trapezes: 0.5 } }] },
   { g: "Bras", ex: [
@@ -169,7 +170,7 @@ var BANK_MATCH = [
   ["dc-halt", ["developpe couche", "haltere"]], ["dc-barre", ["developpe couche"]], ["di-halt", ["developpe incline", "haltere"]],
   ["dm-halt", ["developpe militaire", "haltere"]], ["dm-barre", ["developpe militaire"]], ["dips", ["dips"]], ["pompes-serrees", ["pompe", "serree"]], ["pompes", ["pompe"]],
   ["el-lat-poulie", ["elevation", "lateral", "poulie"]], ["el-lat", ["elevation", "lateral"]], ["ecarte-poulie-mi", ["ecarte", "poulie", "mi hauteur"]], ["ecarte-poulie-haute", ["ecarte", "poulie", "haute"]], ["ecarte-poulie-basse", ["ecarte", "poulie", "basse"]], ["ecarte-poulie", ["ecarte", "poulie"]],
-  ["tirage-vert", ["tirage vertical"]], ["tirage-horiz", ["tirage horizontal"]], ["row-1b", ["rowing", "un bras"]], ["row-barre", ["rowing", "barre"]],
+  ["tirage-vert", ["tirage vertical"]], ["tirage-horiz", ["tirage horizontal"]], ["row-machine-disques", ["rowing", "machine"]], ["row-machine-disques", ["row", "disques"]], ["row-1b", ["rowing", "un bras"]], ["row-barre", ["rowing", "barre"]],
   ["tractions-neutre", ["traction", "neutre"]], ["tractions-supi", ["traction", "supination"]], ["tractions", ["traction"]], ["curl-incl", ["curl", "incline"]], ["curl-halt", ["curl", "haltere"]], ["curl-barre", ["curl", "barre"]],
   ["ext-katana", ["katana"]], ["kickback-poulie", ["kickback", "poulie"]], ["ext-croisee", ["triceps", "croise"]], ["ext-banc-poulie", ["triceps", "allonge", "poulie"]],
   ["ext-pt-1b", ["triceps", "tete", "poulie", "un bras"]], ["ext-pt-corde", ["triceps", "tete", "corde"]], ["ext-pt-barre", ["triceps", "tete", "poulie", "barre"]],
